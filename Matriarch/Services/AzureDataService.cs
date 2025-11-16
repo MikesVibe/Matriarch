@@ -1,14 +1,14 @@
 using Azure.Core;
 using Azure.Identity;
-using Azure.ResourceManager;
-using Azure.ResourceManager.ResourceGraph;
-using Azure.ResourceManager.ResourceGraph.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
 using Matriarch.Configuration;
 using Matriarch.Models;
 using System.Text.Json;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Text;
 using AzureRoleAssignment = Matriarch.Models.RoleAssignment;
 
 namespace Matriarch.Services;
@@ -17,35 +17,39 @@ public class AzureDataService
 {
     private readonly ILogger<AzureDataService> _logger;
     private readonly GraphServiceClient _graphClient;
-    private readonly ArmClient _armClient;
-    private readonly string _subscriptionId;
+    private readonly TokenCredential _credential;
+    private readonly HttpClient _httpClient;
+    private const string ResourceGraphApiEndpoint = "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01";
 
     public AzureDataService(AppSettings settings, ILogger<AzureDataService> logger)
     {
         _logger = logger;
-        _subscriptionId = settings.Azure.SubscriptionId;
 
         // Use ClientSecretCredential for authentication
-        var credential = new ClientSecretCredential(
+        _credential = new ClientSecretCredential(
             settings.Azure.TenantId,
             settings.Azure.ClientId,
             settings.Azure.ClientSecret);
 
         // Initialize Graph client for Entra ID operations
-        _graphClient = new GraphServiceClient(credential);
+        _graphClient = new GraphServiceClient(_credential);
 
-        // Initialize ARM client for role assignments and resource graph
-        _armClient = new ArmClient(credential);
+        // Initialize HttpClient for direct API calls
+        _httpClient = new HttpClient();
     }
 
     public async Task<List<AzureRoleAssignment>> FetchRoleAssignmentsAsync()
     {
-        _logger.LogInformation("Fetching role assignments from Azure Resource Graph for entire directory...");
+        _logger.LogInformation("Fetching role assignments from Azure Resource Graph API for all subscriptions...");
         var roleAssignments = new List<AzureRoleAssignment>();
 
         try
         {
-            // Query to fetch all role assignments across the entire directory
+            // Get access token for Azure Resource Manager
+            var tokenRequestContext = new TokenRequestContext(new[] { "https://management.azure.com/.default" });
+            var token = await _credential.GetTokenAsync(tokenRequestContext, default);
+
+            // Query to fetch all role assignments across all accessible subscriptions
             var query = @"
                 authorizationresources
                 | where type =~ 'microsoft.authorization/roleassignments'
@@ -60,83 +64,40 @@ public class AzureDataService
                 ) on $left.roleDefinitionId == $right.id
                 | project id, principalId, principalType, roleDefinitionId, roleName, scope";
 
-            var queryContent = new ResourceQueryContent(query);
-            
-            // Add subscription to the query scope
-            queryContent.Subscriptions.Add(_subscriptionId);
-
-            // Execute the query using Resource Graph through tenant
-            var tenant = _armClient.GetTenants().First();
-            var response = await tenant.GetResourcesAsync(queryContent);
-
-            if (response?.Value?.Data != null)
+            // Create the request payload
+            var requestBody = new
             {
-                // Parse the JSON response
-                var dataElement = response.Value.Data.ToObjectFromJson<JsonElement>();
-                
-                // The Data property contains the result set directly
-                // Check if it's an array (rows) or an object with columns/rows
+                query = query,
+                options = new
+                {
+                    resultFormat = "objectArray"
+                }
+            };
+
+            var jsonContent = JsonSerializer.Serialize(requestBody);
+            var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+            // Set up the HTTP request
+            var request = new HttpRequestMessage(HttpMethod.Post, ResourceGraphApiEndpoint);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
+            request.Content = content;
+
+            // Execute the request
+            var response = await _httpClient.SendAsync(request);
+            response.EnsureSuccessStatusCode();
+
+            var responseContent = await response.Content.ReadAsStringAsync();
+            var responseDocument = JsonDocument.Parse(responseContent);
+
+            // Parse the response
+            if (responseDocument.RootElement.TryGetProperty("data", out var dataElement))
+            {
                 if (dataElement.ValueKind == JsonValueKind.Array)
                 {
-                    // Data is directly the rows array
                     foreach (var row in dataElement.EnumerateArray())
                     {
-                        // Each row can be either an array or an object
-                        if (row.ValueKind == JsonValueKind.Array)
+                        if (row.ValueKind == JsonValueKind.Object)
                         {
-                            var rowArray = row.EnumerateArray().ToList();
-                            if (rowArray.Count >= 6)
-                            {
-                                roleAssignments.Add(new AzureRoleAssignment
-                                {
-                                    Id = rowArray[0].GetString() ?? string.Empty,
-                                    PrincipalId = rowArray[1].GetString() ?? string.Empty,
-                                    PrincipalType = rowArray[2].GetString() ?? string.Empty,
-                                    RoleDefinitionId = rowArray[3].GetString() ?? string.Empty,
-                                    RoleName = rowArray[4].GetString() ?? string.Empty,
-                                    Scope = rowArray[5].GetString() ?? string.Empty
-                                });
-                            }
-                        }
-                        else if (row.ValueKind == JsonValueKind.Object)
-                        {
-                            // Row is an object with named properties
-                            roleAssignments.Add(new AzureRoleAssignment
-                            {
-                                Id = row.TryGetProperty("id", out var idProp) ? idProp.GetString() ?? string.Empty : string.Empty,
-                                PrincipalId = row.TryGetProperty("principalId", out var principalIdProp) ? principalIdProp.GetString() ?? string.Empty : string.Empty,
-                                PrincipalType = row.TryGetProperty("principalType", out var principalTypeProp) ? principalTypeProp.GetString() ?? string.Empty : string.Empty,
-                                RoleDefinitionId = row.TryGetProperty("roleDefinitionId", out var roleDefProp) ? roleDefProp.GetString() ?? string.Empty : string.Empty,
-                                RoleName = row.TryGetProperty("roleName", out var roleNameProp) ? roleNameProp.GetString() ?? string.Empty : string.Empty,
-                                Scope = row.TryGetProperty("scope", out var scopeProp) ? scopeProp.GetString() ?? string.Empty : string.Empty
-                            });
-                        }
-                    }
-                }
-                else if (dataElement.TryGetProperty("rows", out var rowsElement) && rowsElement.ValueKind == JsonValueKind.Array)
-                {
-                    // Data is an object with a "rows" property
-                    foreach (var row in rowsElement.EnumerateArray())
-                    {
-                        if (row.ValueKind == JsonValueKind.Array)
-                        {
-                            var rowArray = row.EnumerateArray().ToList();
-                            if (rowArray.Count >= 6)
-                            {
-                                roleAssignments.Add(new AzureRoleAssignment
-                                {
-                                    Id = rowArray[0].GetString() ?? string.Empty,
-                                    PrincipalId = rowArray[1].GetString() ?? string.Empty,
-                                    PrincipalType = rowArray[2].GetString() ?? string.Empty,
-                                    RoleDefinitionId = rowArray[3].GetString() ?? string.Empty,
-                                    RoleName = rowArray[4].GetString() ?? string.Empty,
-                                    Scope = rowArray[5].GetString() ?? string.Empty
-                                });
-                            }
-                        }
-                        else if (row.ValueKind == JsonValueKind.Object)
-                        {
-                            // Row is an object with named properties
                             roleAssignments.Add(new AzureRoleAssignment
                             {
                                 Id = row.TryGetProperty("id", out var idProp) ? idProp.GetString() ?? string.Empty : string.Empty,
@@ -151,11 +112,15 @@ public class AzureDataService
                 }
             }
 
-            _logger.LogInformation($"Fetched {roleAssignments.Count} role assignments from entire directory");
+            _logger.LogInformation($"Fetched {roleAssignments.Count} role assignments from all accessible subscriptions");
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex, "HTTP error fetching role assignments from Resource Graph API");
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error fetching role assignments from Resource Graph");
+            _logger.LogError(ex, "Error fetching role assignments from Resource Graph API");
         }
 
         return roleAssignments;

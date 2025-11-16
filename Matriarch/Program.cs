@@ -117,8 +117,6 @@ class Program
 
         if (string.IsNullOrWhiteSpace(settings.Azure.TenantId))
             errors.Add("Azure TenantId is not configured");
-        if (string.IsNullOrWhiteSpace(settings.Azure.SubscriptionId))
-            errors.Add("Azure SubscriptionId is not configured");
         if (string.IsNullOrWhiteSpace(settings.Azure.ClientId))
             errors.Add("Azure ClientId is not configured");
         if (string.IsNullOrWhiteSpace(settings.Azure.ClientSecret))
