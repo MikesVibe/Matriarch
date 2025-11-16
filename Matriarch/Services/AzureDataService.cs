@@ -64,7 +64,7 @@ public class AzureDataService
                 roleAssignments.Add(new AzureRoleAssignment
                 {
                     Id = properties.Id?.ToString() ?? string.Empty,
-                    PrincipalId = properties.PrincipalId.ToString(),
+                    PrincipalId = properties.PrincipalId?.ToString() ?? string.Empty,
                     PrincipalType = properties.PrincipalType?.ToString() ?? string.Empty,
                     RoleDefinitionId = roleDefinitionId,
                     RoleName = roleName,

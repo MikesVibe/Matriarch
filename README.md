@@ -67,10 +67,50 @@ dotnet build
 
 ## Running
 
+### Using .NET CLI
+
 ```bash
 cd Matriarch
 dotnet run
 ```
+
+### Using Docker
+
+Build the Docker image:
+```bash
+cd Matriarch
+docker build -t matriarch:latest .
+```
+
+Run the container:
+```bash
+docker run --rm \
+  -e Azure__TenantId="your-tenant-id" \
+  -e Azure__SubscriptionId="your-subscription-id" \
+  -e Azure__ClientId="your-client-id" \
+  -e Azure__ClientSecret="your-client-secret" \
+  -e Neo4j__Uri="bolt://host.docker.internal:7687" \
+  -e Neo4j__Username="neo4j" \
+  -e Neo4j__Password="your-password" \
+  matriarch:latest
+```
+
+### Using Docker Compose
+
+Create a `.env` file in the root directory with your Azure credentials:
+```env
+AZURE_TENANT_ID=your-tenant-id
+AZURE_SUBSCRIPTION_ID=your-subscription-id
+AZURE_CLIENT_ID=your-client-id
+AZURE_CLIENT_SECRET=your-client-secret
+```
+
+Start both Neo4j and Matriarch:
+```bash
+docker-compose up
+```
+
+Access Neo4j Browser at `http://localhost:7474` (username: `neo4j`, password: `password`)
 
 ## Graph Schema
 
