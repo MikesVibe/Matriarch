@@ -48,17 +48,17 @@ class Program
             {
                 var test = roleAssignmentsTask.First();
                 logger.LogInformation("Found {count} of Role Assignment/s", roleAssignmentsTask.Count);
-                //            logger.LogInformation("Role Assignment: Id={Id}, RoleDefinitionId={RoleDefinitionId}, PrincipalId={PrincipalId}, Scope={Scope}",
-                //test.Id, test.RoleDefinitionId, test.PrincipalId, test.Scope);
+                logger.LogInformation("Role Assignment: Id={Id}, RoleDefinitionId={RoleDefinitionId}, PrincipalId={PrincipalId}, Scope={Scope}",
+                    test.Id, test.RoleDefinitionId, test.PrincipalId, test.Scope);
 
 
-                roleAssignmentsTask.ForEach(ra =>
-                    //logger.LogInformation("Role Assignment: Id={Id}, RoleDefinitionId={RoleDefinitionId}, PrincipalId={PrincipalId}, Scope={Scope}, RoleName={RoleName}",
-                    //ra.Id, ra.RoleDefinitionId, ra.PrincipalId, ra.Scope, ra.RoleName)
+                //roleAssignmentsTask.ForEach(ra =>
+                //    //logger.LogInformation("Role Assignment: Id={Id}, RoleDefinitionId={RoleDefinitionId}, PrincipalId={PrincipalId}, Scope={Scope}, RoleName={RoleName}",
+                //    //ra.Id, ra.RoleDefinitionId, ra.PrincipalId, ra.Scope, ra.RoleName)
 
-                    logger.LogInformation("PrincipalId={PrincipalId}, RoleName={RoleName}",
-                    ra.PrincipalId, ra.RoleName)
-                    );
+                //    logger.LogInformation("PrincipalId={PrincipalId}, RoleName={RoleName}",
+                //    ra.PrincipalId, ra.RoleName)
+                //    );
 
             }
             else

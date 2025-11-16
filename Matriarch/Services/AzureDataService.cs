@@ -64,55 +64,83 @@ public class AzureDataService
                 ) on $left.roleDefinitionId == $right.id
                 | project id, principalId, principalType, roleDefinitionId, roleName, scope";
 
-            // Create the request payload
-            var requestBody = new
+            string? skipToken = null;
+            int pageCount = 0;
+
+            do
             {
-                query = query,
-                options = new
+                pageCount++;
+                _logger.LogInformation($"Fetching page {pageCount} of role assignments...");
+
+                // Create the request payload
+                var requestBody = new Dictionary<string, object>
                 {
-                    resultFormat = "objectArray"
-                }
-            };
-
-            var jsonContent = JsonSerializer.Serialize(requestBody);
-            var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
-
-            // Set up the HTTP request
-            var request = new HttpRequestMessage(HttpMethod.Post, ResourceGraphApiEndpoint);
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
-            request.Content = content;
-
-            // Execute the request
-            var response = await _httpClient.SendAsync(request);
-            response.EnsureSuccessStatusCode();
-
-            var responseContent = await response.Content.ReadAsStringAsync();
-            var responseDocument = JsonDocument.Parse(responseContent);
-
-            // Parse the response
-            if (responseDocument.RootElement.TryGetProperty("data", out var dataElement))
-            {
-                if (dataElement.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var row in dataElement.EnumerateArray())
+                    ["query"] = query,
+                    ["options"] = new Dictionary<string, object>
                     {
-                        if (row.ValueKind == JsonValueKind.Object)
+                        ["resultFormat"] = "objectArray",
+                        ["$top"] = 1000  // Maximum page size
+                    }
+                };
+
+                // Add skipToken if we have one (for pagination)
+                if (!string.IsNullOrEmpty(skipToken))
+                {
+                    ((Dictionary<string, object>)requestBody["options"])["$skipToken"] = skipToken;
+                }
+
+                var jsonContent = JsonSerializer.Serialize(requestBody);
+                var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+                // Set up the HTTP request
+                var request = new HttpRequestMessage(HttpMethod.Post, ResourceGraphApiEndpoint);
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
+                request.Content = content;
+
+                // Execute the request
+                var response = await _httpClient.SendAsync(request);
+                response.EnsureSuccessStatusCode();
+
+                var responseContent = await response.Content.ReadAsStringAsync();
+                var responseDocument = JsonDocument.Parse(responseContent);
+
+                // Parse the response
+                if (responseDocument.RootElement.TryGetProperty("data", out var dataElement))
+                {
+                    if (dataElement.ValueKind == JsonValueKind.Array)
+                    {
+                        int rowsInPage = 0;
+                        foreach (var row in dataElement.EnumerateArray())
                         {
-                            roleAssignments.Add(new AzureRoleAssignment
+                            if (row.ValueKind == JsonValueKind.Object)
                             {
-                                Id = row.TryGetProperty("id", out var idProp) ? idProp.GetString() ?? string.Empty : string.Empty,
-                                PrincipalId = row.TryGetProperty("principalId", out var principalIdProp) ? principalIdProp.GetString() ?? string.Empty : string.Empty,
-                                PrincipalType = row.TryGetProperty("principalType", out var principalTypeProp) ? principalTypeProp.GetString() ?? string.Empty : string.Empty,
-                                RoleDefinitionId = row.TryGetProperty("roleDefinitionId", out var roleDefProp) ? roleDefProp.GetString() ?? string.Empty : string.Empty,
-                                RoleName = row.TryGetProperty("roleName", out var roleNameProp) ? roleNameProp.GetString() ?? string.Empty : string.Empty,
-                                Scope = row.TryGetProperty("scope", out var scopeProp) ? scopeProp.GetString() ?? string.Empty : string.Empty
-                            });
+                                roleAssignments.Add(new AzureRoleAssignment
+                                {
+                                    Id = row.TryGetProperty("id", out var idProp) ? idProp.GetString() ?? string.Empty : string.Empty,
+                                    PrincipalId = row.TryGetProperty("principalId", out var principalIdProp) ? principalIdProp.GetString() ?? string.Empty : string.Empty,
+                                    PrincipalType = row.TryGetProperty("principalType", out var principalTypeProp) ? principalTypeProp.GetString() ?? string.Empty : string.Empty,
+                                    RoleDefinitionId = row.TryGetProperty("roleDefinitionId", out var roleDefProp) ? roleDefProp.GetString() ?? string.Empty : string.Empty,
+                                    RoleName = row.TryGetProperty("roleName", out var roleNameProp) ? roleNameProp.GetString() ?? string.Empty : string.Empty,
+                                    Scope = row.TryGetProperty("scope", out var scopeProp) ? scopeProp.GetString() ?? string.Empty : string.Empty
+                                });
+                                rowsInPage++;
+                            }
                         }
+                        _logger.LogInformation($"Fetched {rowsInPage} role assignments from page {pageCount}");
                     }
                 }
-            }
 
-            _logger.LogInformation($"Fetched {roleAssignments.Count} role assignments from all accessible subscriptions");
+                // Check for continuation token
+                skipToken = null;
+                if (responseDocument.RootElement.TryGetProperty("$skipToken", out var skipTokenElement))
+                {
+                    skipToken = skipTokenElement.GetString();
+                    _logger.LogInformation($"More results available, continuing to next page...");
+                }
+
+            } while (!string.IsNullOrEmpty(skipToken));
+
+            _logger.LogInformation($"Fetched {roleAssignments.Count} total role assignments from all accessible subscriptions across {pageCount} page(s)");
         }
         catch (HttpRequestException ex)
         {
