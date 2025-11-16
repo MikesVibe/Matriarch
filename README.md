@@ -5,7 +5,7 @@ A .NET 8 application that fetches data from Azure (Entra ID and Azure Resource M
 ## Features
 
 - **Fetches Azure Data:**
-  - Role assignments from Azure Resource Manager at subscription level
+  - Role assignments from Azure Resource Graph for the entire directory
   - Enterprise applications (Service Principals) from Microsoft Graph
   - App registrations with their federated credentials from Microsoft Graph
   - Entra security groups from Microsoft Graph
@@ -26,8 +26,8 @@ A .NET 8 application that fetches data from Azure (Entra ID and Azure Resource M
     - `Application.Read.All`
     - `Directory.Read.All`
     - `GroupMember.Read.All`
-  - **Azure RBAC:**
-    - `Reader` role at the subscription level (to read role assignments)
+  - **Azure Resource Graph:**
+    - Access to query role assignments across the directory (subscription-level Reader role recommended)
 
 ## Configuration
 

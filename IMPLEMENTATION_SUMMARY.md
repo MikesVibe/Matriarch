@@ -24,10 +24,10 @@ Successfully implemented a .NET 8 console application that fetches data from Azu
 ##### AzureDataService (`Services/AzureDataService.cs`)
 Fetches data from Azure using:
 - **Microsoft Graph SDK**: For Entra ID data (apps, groups, service principals)
-- **Azure Resource Manager SDK**: For role assignments
+- **Azure Resource Graph SDK**: For querying role assignments across the entire directory
 
 Methods:
-- `FetchRoleAssignmentsAsync()`: Fetches role assignments at subscription level
+- `FetchRoleAssignmentsAsync()`: Fetches role assignments for the entire directory using Resource Graph queries
 - `FetchEnterpriseApplicationsAsync()`: Fetches service principals with group memberships
 - `FetchAppRegistrationsAsync()`: Fetches app registrations with federated credentials
 - `FetchSecurityGroupsAsync()`: Fetches security-enabled groups
@@ -86,7 +86,7 @@ All dependencies have been verified for security vulnerabilities using the GitHu
 ## Features
 
 ### Data Fetching
-✅ Role assignments from Azure Resource Manager
+✅ Role assignments from Azure Resource Graph for the entire directory
 ✅ Enterprise applications (Service Principals) from Microsoft Graph
 ✅ App registrations with federated credentials from Microsoft Graph
 ✅ Entra security groups from Microsoft Graph
@@ -187,8 +187,8 @@ RETURN path
 - `Directory.Read.All`: Read directory data
 - `GroupMember.Read.All`: Read group memberships
 
-### Azure RBAC
-- `Reader`: At subscription level to read role assignments
+### Azure Resource Graph
+- Access to query role assignments across the entire directory (subscription-level Reader role recommended)
 
 ## Implementation Highlights
 
