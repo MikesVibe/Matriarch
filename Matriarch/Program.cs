@@ -41,44 +41,68 @@ class Program
             var azureDataService = new AzureDataService(settings, loggerFactory.CreateLogger<AzureDataService>());
             var neo4jService = new Neo4jService(settings, loggerFactory.CreateLogger<Neo4jService>());
 
-            // Initialize Neo4j database schema
-            await neo4jService.InitializeDatabaseAsync();
 
-            // Fetch data from Azure
-            logger.LogInformation("=== Fetching data from Azure ===");
-            
-            var appRegistrationsTask = azureDataService.FetchAppRegistrationsAsync();
-            var enterpriseAppsTask = azureDataService.FetchEnterpriseApplicationsAsync();
-            var securityGroupsTask = azureDataService.FetchSecurityGroupsAsync();
-            var roleAssignmentsTask = azureDataService.FetchRoleAssignmentsAsync();
+            var roleAssignmentsTask = await azureDataService.FetchRoleAssignmentsAsync();
 
-            await Task.WhenAll(appRegistrationsTask, enterpriseAppsTask, securityGroupsTask, roleAssignmentsTask);
+            if (roleAssignmentsTask.Count > 0)
+            {
+                var test = roleAssignmentsTask.First();
+                logger.LogInformation("Found {count} of Role Assignment/s", roleAssignmentsTask.Count);
+                //            logger.LogInformation("Role Assignment: Id={Id}, RoleDefinitionId={RoleDefinitionId}, PrincipalId={PrincipalId}, Scope={Scope}",
+                //test.Id, test.RoleDefinitionId, test.PrincipalId, test.Scope);
 
-            var appRegistrations = await appRegistrationsTask;
-            var enterpriseApps = await enterpriseAppsTask;
-            var securityGroups = await securityGroupsTask;
-            var roleAssignments = await roleAssignmentsTask;
 
-            // Link service principal IDs to app registrations
-            LinkAppRegistrationsToEnterpriseApps(appRegistrations, enterpriseApps, logger);
+                roleAssignmentsTask.ForEach(ra =>
+                    //logger.LogInformation("Role Assignment: Id={Id}, RoleDefinitionId={RoleDefinitionId}, PrincipalId={PrincipalId}, Scope={Scope}, RoleName={RoleName}",
+                    //ra.Id, ra.RoleDefinitionId, ra.PrincipalId, ra.Scope, ra.RoleName)
 
-            // Store data in Neo4j
-            logger.LogInformation("=== Storing data in Neo4j ===");
-            
-            await neo4jService.StoreAppRegistrationsAsync(appRegistrations);
-            await neo4jService.StoreSecurityGroupsAsync(securityGroups);
-            await neo4jService.StoreEnterpriseApplicationsAsync(enterpriseApps);
-            await neo4jService.StoreRoleAssignmentsAsync(roleAssignments, enterpriseApps, securityGroups);
-            await neo4jService.StoreGroupMembershipsAsync(enterpriseApps);
+                    logger.LogInformation("PrincipalId={PrincipalId}, RoleName={RoleName}",
+                    ra.PrincipalId, ra.RoleName)
+                    );
 
-            logger.LogInformation("=== Data integration completed successfully ===");
-            logger.LogInformation($"Summary:");
-            logger.LogInformation($"  - App Registrations: {appRegistrations.Count}");
-            logger.LogInformation($"  - Enterprise Applications: {enterpriseApps.Count}");
-            logger.LogInformation($"  - Security Groups: {securityGroups.Count}");
-            logger.LogInformation($"  - Role Assignments: {roleAssignments.Count}");
+            }
+            else
+            {
+                logger.LogWarning("No role assignments found");
+            }
+            //// Initialize Neo4j database schema
+            //await neo4jService.InitializeDatabaseAsync();
 
-            await neo4jService.DisposeAsync();
+            //// Fetch data from Azure
+            //logger.LogInformation("=== Fetching data from Azure ===");
+
+            //var appRegistrationsTask = azureDataService.FetchAppRegistrationsAsync();
+            //var enterpriseAppsTask = azureDataService.FetchEnterpriseApplicationsAsync();
+            //var securityGroupsTask = azureDataService.FetchSecurityGroupsAsync();
+            //var roleAssignmentsTask = azureDataService.FetchRoleAssignmentsAsync();
+
+            //await Task.WhenAll(appRegistrationsTask, enterpriseAppsTask, securityGroupsTask, roleAssignmentsTask);
+
+            //var appRegistrations = await appRegistrationsTask;
+            //var enterpriseApps = await enterpriseAppsTask;
+            //var securityGroups = await securityGroupsTask;
+            //var roleAssignments = await roleAssignmentsTask;
+
+            //// Link service principal IDs to app registrations
+            //LinkAppRegistrationsToEnterpriseApps(appRegistrations, enterpriseApps, logger);
+
+            //// Store data in Neo4j
+            //logger.LogInformation("=== Storing data in Neo4j ===");
+
+            //await neo4jService.StoreAppRegistrationsAsync(appRegistrations);
+            //await neo4jService.StoreSecurityGroupsAsync(securityGroups);
+            //await neo4jService.StoreEnterpriseApplicationsAsync(enterpriseApps);
+            //await neo4jService.StoreRoleAssignmentsAsync(roleAssignments, enterpriseApps, securityGroups);
+            //await neo4jService.StoreGroupMembershipsAsync(enterpriseApps);
+
+            //logger.LogInformation("=== Data integration completed successfully ===");
+            //logger.LogInformation($"Summary:");
+            //logger.LogInformation($"  - App Registrations: {appRegistrations.Count}");
+            //logger.LogInformation($"  - Enterprise Applications: {enterpriseApps.Count}");
+            //logger.LogInformation($"  - Security Groups: {securityGroups.Count}");
+            //logger.LogInformation($"  - Role Assignments: {roleAssignments.Count}");
+
+            //await neo4jService.DisposeAsync();
         }
         catch (Exception ex)
         {
@@ -124,7 +148,7 @@ class Program
         ILogger logger)
     {
         logger.LogInformation("Linking app registrations to enterprise applications...");
-        
+
         var enterpriseAppsByAppId = enterpriseApps.ToDictionary(e => e.AppId, e => e);
 
         foreach (var appReg in appRegistrations)

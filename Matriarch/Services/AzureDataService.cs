@@ -74,8 +74,48 @@ public class AzureDataService
                 // Parse the JSON response
                 var dataElement = response.Value.Data.ToObjectFromJson<JsonElement>();
                 
-                if (dataElement.TryGetProperty("rows", out var rowsElement) && rowsElement.ValueKind == JsonValueKind.Array)
+                // The Data property contains the result set directly
+                // Check if it's an array (rows) or an object with columns/rows
+                if (dataElement.ValueKind == JsonValueKind.Array)
                 {
+                    // Data is directly the rows array
+                    foreach (var row in dataElement.EnumerateArray())
+                    {
+                        // Each row can be either an array or an object
+                        if (row.ValueKind == JsonValueKind.Array)
+                        {
+                            var rowArray = row.EnumerateArray().ToList();
+                            if (rowArray.Count >= 6)
+                            {
+                                roleAssignments.Add(new AzureRoleAssignment
+                                {
+                                    Id = rowArray[0].GetString() ?? string.Empty,
+                                    PrincipalId = rowArray[1].GetString() ?? string.Empty,
+                                    PrincipalType = rowArray[2].GetString() ?? string.Empty,
+                                    RoleDefinitionId = rowArray[3].GetString() ?? string.Empty,
+                                    RoleName = rowArray[4].GetString() ?? string.Empty,
+                                    Scope = rowArray[5].GetString() ?? string.Empty
+                                });
+                            }
+                        }
+                        else if (row.ValueKind == JsonValueKind.Object)
+                        {
+                            // Row is an object with named properties
+                            roleAssignments.Add(new AzureRoleAssignment
+                            {
+                                Id = row.TryGetProperty("id", out var idProp) ? idProp.GetString() ?? string.Empty : string.Empty,
+                                PrincipalId = row.TryGetProperty("principalId", out var principalIdProp) ? principalIdProp.GetString() ?? string.Empty : string.Empty,
+                                PrincipalType = row.TryGetProperty("principalType", out var principalTypeProp) ? principalTypeProp.GetString() ?? string.Empty : string.Empty,
+                                RoleDefinitionId = row.TryGetProperty("roleDefinitionId", out var roleDefProp) ? roleDefProp.GetString() ?? string.Empty : string.Empty,
+                                RoleName = row.TryGetProperty("roleName", out var roleNameProp) ? roleNameProp.GetString() ?? string.Empty : string.Empty,
+                                Scope = row.TryGetProperty("scope", out var scopeProp) ? scopeProp.GetString() ?? string.Empty : string.Empty
+                            });
+                        }
+                    }
+                }
+                else if (dataElement.TryGetProperty("rows", out var rowsElement) && rowsElement.ValueKind == JsonValueKind.Array)
+                {
+                    // Data is an object with a "rows" property
                     foreach (var row in rowsElement.EnumerateArray())
                     {
                         if (row.ValueKind == JsonValueKind.Array)
@@ -93,6 +133,19 @@ public class AzureDataService
                                     Scope = rowArray[5].GetString() ?? string.Empty
                                 });
                             }
+                        }
+                        else if (row.ValueKind == JsonValueKind.Object)
+                        {
+                            // Row is an object with named properties
+                            roleAssignments.Add(new AzureRoleAssignment
+                            {
+                                Id = row.TryGetProperty("id", out var idProp) ? idProp.GetString() ?? string.Empty : string.Empty,
+                                PrincipalId = row.TryGetProperty("principalId", out var principalIdProp) ? principalIdProp.GetString() ?? string.Empty : string.Empty,
+                                PrincipalType = row.TryGetProperty("principalType", out var principalTypeProp) ? principalTypeProp.GetString() ?? string.Empty : string.Empty,
+                                RoleDefinitionId = row.TryGetProperty("roleDefinitionId", out var roleDefProp) ? roleDefProp.GetString() ?? string.Empty : string.Empty,
+                                RoleName = row.TryGetProperty("roleName", out var roleNameProp) ? roleNameProp.GetString() ?? string.Empty : string.Empty,
+                                Scope = row.TryGetProperty("scope", out var scopeProp) ? scopeProp.GetString() ?? string.Empty : string.Empty
+                            });
                         }
                     }
                 }
