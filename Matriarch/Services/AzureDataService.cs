@@ -115,6 +115,186 @@ public class AzureDataService
         return null;
     }
 
+    public async Task<List<EnterpriseApplication>> FetchEnterpriseApplicationsAsync()
+    {
+        const string cacheKey = "EnterpriseApplications";
+        
+        // Try to get cached data first
+        var cachedData = await _cachingService.GetCachedDataAsync<List<EnterpriseApplication>>(cacheKey);
+        if (cachedData != null)
+        {
+            _logger.LogInformation($"Using cached enterprise applications ({cachedData.Count} items)");
+            return cachedData;
+        }
+
+        _logger.LogInformation("Fetching enterprise applications from Microsoft Graph...");
+        var enterpriseApps = new List<EnterpriseApplication>();
+
+        try
+        {
+            var servicePrincipals = await _graphClient.ServicePrincipals.GetAsync();
+            
+            if (servicePrincipals?.Value != null)
+            {
+                foreach (var sp in servicePrincipals.Value)
+                {
+                    var app = new EnterpriseApplication
+                    {
+                        Id = sp.Id ?? string.Empty,
+                        AppId = sp.AppId ?? string.Empty,
+                        DisplayName = sp.DisplayName ?? string.Empty
+                    };
+
+                    // Fetch group memberships
+                    try
+                    {
+                        var memberOf = await _graphClient.ServicePrincipals[sp.Id].MemberOf.GetAsync();
+                        if (memberOf?.Value != null)
+                        {
+                            app.GroupMemberships = memberOf.Value
+                                .Where(m => m is Group)
+                                .Select(m => m.Id ?? string.Empty)
+                                .ToList();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, $"Error fetching group memberships for {sp.DisplayName}");
+                    }
+
+                    enterpriseApps.Add(app);
+                }
+            }
+
+            _logger.LogInformation($"Fetched {enterpriseApps.Count} enterprise applications");
+            
+            // Cache the fetched data
+            await _cachingService.SetCachedDataAsync(cacheKey, enterpriseApps);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching enterprise applications");
+        }
+
+        return enterpriseApps;
+    }
+
+    public async Task<List<AppRegistration>> FetchAppRegistrationsAsync()
+    {
+        const string cacheKey = "AppRegistrations";
+        
+        // Try to get cached data first
+        var cachedData = await _cachingService.GetCachedDataAsync<List<AppRegistration>>(cacheKey);
+        if (cachedData != null)
+        {
+            _logger.LogInformation($"Using cached app registrations ({cachedData.Count} items)");
+            return cachedData;
+        }
+
+        _logger.LogInformation("Fetching app registrations from Microsoft Graph...");
+        var appRegistrations = new List<AppRegistration>();
+
+        try
+        {
+            var applicationsPage = await _graphClient.Applications.GetAsync(requestConfiguration =>
+            {
+                requestConfiguration.QueryParameters.Expand = ["federatedIdentityCredentials"];
+                requestConfiguration.QueryParameters.Top = 999; // Maximum page size for Graph API
+            });
+
+            if(applicationsPage is null)
+            {
+                _logger.LogWarning("No applications found in the tenant.");
+                return appRegistrations;
+            }
+
+            int pageCount = 0;
+
+            var pageIterator = PageIterator<Application, ApplicationCollectionResponse>
+                .CreatePageIterator(
+                    _graphClient,
+                    applicationsPage,
+                    app =>
+                    {
+                        var appReg = new AppRegistration
+                        {
+                            Id = app.Id ?? string.Empty,
+                            AppId = app.AppId ?? string.Empty,
+                            DisplayName = app.DisplayName ?? string.Empty
+                        };
+
+                        appRegistrations.Add(appReg);
+                        return true; // Continue iterating
+                    },
+                    req =>
+                    {
+                        pageCount++;
+                        return req;
+                    });
+
+            await pageIterator.IterateAsync();
+
+            _logger.LogInformation("Fetched {AppRegistrationsCount} total app registrations across {PageCount} page(s)", appRegistrations.Count, pageCount);
+            
+            // Cache the fetched data
+            await _cachingService.SetCachedDataAsync(cacheKey, appRegistrations);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching app registrations");
+        }
+
+        return appRegistrations;
+    }
+
+    public async Task<List<SecurityGroup>> FetchSecurityGroupsAsync()
+    {
+        const string cacheKey = "SecurityGroups";
+        
+        // Try to get cached data first
+        var cachedData = await _cachingService.GetCachedDataAsync<List<SecurityGroup>>(cacheKey);
+        if (cachedData != null)
+        {
+            _logger.LogInformation($"Using cached security groups ({cachedData.Count} items)");
+            return cachedData;
+        }
+
+        _logger.LogInformation("Fetching security groups from Microsoft Graph...");
+        var securityGroups = new List<SecurityGroup>();
+
+        try
+        {
+            var groups = await _graphClient.Groups.GetAsync(config =>
+            {
+                config.QueryParameters.Filter = "securityEnabled eq true";
+            });
+            
+            if (groups?.Value != null)
+            {
+                foreach (var group in groups.Value)
+                {
+                    securityGroups.Add(new SecurityGroup
+                    {
+                        Id = group.Id ?? string.Empty,
+                        DisplayName = group.DisplayName ?? string.Empty,
+                        Description = group.Description
+                    });
+                }
+            }
+
+            _logger.LogInformation($"Fetched {securityGroups.Count} security groups");
+            
+            // Cache the fetched data
+            await _cachingService.SetCachedDataAsync(cacheKey, securityGroups);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching security groups");
+        }
+
+        return securityGroups;
+    }
+
     private async Task<AccessToken> GetAuthorizationToken()
     {
         var tokenRequestContext = new TokenRequestContext(["https://management.azure.com/.default"]);
@@ -184,148 +364,5 @@ public class AzureDataService
                 Scope = row.TryGetProperty("scope", out var scopeProp) ? scopeProp.GetString() ?? string.Empty : string.Empty
             };
         }
-    }
-
-    public async Task<List<EnterpriseApplication>> FetchEnterpriseApplicationsAsync()
-    {
-        _logger.LogInformation("Fetching enterprise applications from Microsoft Graph...");
-        var enterpriseApps = new List<EnterpriseApplication>();
-
-        try
-        {
-            var servicePrincipals = await _graphClient.ServicePrincipals.GetAsync();
-            
-            if (servicePrincipals?.Value != null)
-            {
-                foreach (var sp in servicePrincipals.Value)
-                {
-                    var app = new EnterpriseApplication
-                    {
-                        Id = sp.Id ?? string.Empty,
-                        AppId = sp.AppId ?? string.Empty,
-                        DisplayName = sp.DisplayName ?? string.Empty
-                    };
-
-                    // Fetch group memberships
-                    try
-                    {
-                        var memberOf = await _graphClient.ServicePrincipals[sp.Id].MemberOf.GetAsync();
-                        if (memberOf?.Value != null)
-                        {
-                            app.GroupMemberships = memberOf.Value
-                                .Where(m => m is Group)
-                                .Select(m => m.Id ?? string.Empty)
-                                .ToList();
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, $"Error fetching group memberships for {sp.DisplayName}");
-                    }
-
-                    enterpriseApps.Add(app);
-                }
-            }
-
-            _logger.LogInformation($"Fetched {enterpriseApps.Count} enterprise applications");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error fetching enterprise applications");
-        }
-
-        return enterpriseApps;
-    }
-
-    public async Task<List<AppRegistration>> FetchAppRegistrationsAsync()
-    {
-        _logger.LogInformation("Fetching app registrations from Microsoft Graph...");
-        var appRegistrations = new List<AppRegistration>();
-
-        try
-        {
-            var applications = await _graphClient.Applications.GetAsync();
-            
-            if (applications?.Value != null)
-            {
-                foreach (var app in applications.Value)
-                {
-                    var appReg = new AppRegistration
-                    {
-                        Id = app.Id ?? string.Empty,
-                        AppId = app.AppId ?? string.Empty,
-                        DisplayName = app.DisplayName ?? string.Empty
-                    };
-
-                    // Fetch federated credentials
-                    try
-                    {
-                        var fedCreds = await _graphClient.Applications[app.Id]
-                            .FederatedIdentityCredentials.GetAsync();
-                        
-                        if (fedCreds?.Value != null)
-                        {
-                            appReg.FederatedCredentials = fedCreds.Value.Select(fc => new FederatedCredential
-                            {
-                                Id = fc.Id ?? string.Empty,
-                                Name = fc.Name ?? string.Empty,
-                                Issuer = fc.Issuer ?? string.Empty,
-                                Subject = fc.Subject ?? string.Empty,
-                                Audiences = fc.Audiences?.ToList() ?? new List<string>()
-                            }).ToList();
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, $"Error fetching federated credentials for {app.DisplayName}");
-                    }
-
-                    appRegistrations.Add(appReg);
-                }
-            }
-
-            _logger.LogInformation($"Fetched {appRegistrations.Count} app registrations");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error fetching app registrations");
-        }
-
-        return appRegistrations;
-    }
-
-    public async Task<List<SecurityGroup>> FetchSecurityGroupsAsync()
-    {
-        _logger.LogInformation("Fetching security groups from Microsoft Graph...");
-        var securityGroups = new List<SecurityGroup>();
-
-        try
-        {
-            var groups = await _graphClient.Groups.GetAsync(config =>
-            {
-                config.QueryParameters.Filter = "securityEnabled eq true";
-            });
-            
-            if (groups?.Value != null)
-            {
-                foreach (var group in groups.Value)
-                {
-                    securityGroups.Add(new SecurityGroup
-                    {
-                        Id = group.Id ?? string.Empty,
-                        DisplayName = group.DisplayName ?? string.Empty,
-                        Description = group.Description
-                    });
-                }
-            }
-
-            _logger.LogInformation($"Fetched {securityGroups.Count} security groups");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error fetching security groups");
-        }
-
-        return securityGroups;
     }
 }

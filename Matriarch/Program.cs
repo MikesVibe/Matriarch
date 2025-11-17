@@ -38,40 +38,45 @@ class Program
             ValidateConfiguration(settings, logger);
 
             // Initialize services
-            var azureDataService = new AzureDataService(settings, loggerFactory.CreateLogger<AzureDataService>());
+            var cachingService = new CachingService(settings, loggerFactory.CreateLogger<CachingService>());
+            var azureDataService = new AzureDataService(settings, loggerFactory.CreateLogger<AzureDataService>(), cachingService);
             var neo4jService = new Neo4jService(settings, loggerFactory.CreateLogger<Neo4jService>());
 
 
-            var roleAssignmentsTask = await azureDataService.FetchRoleAssignmentsAsync();
+            //var roleAssignmentsTask = await azureDataService.FetchRoleAssignmentsAsync();
 
-            if (roleAssignmentsTask.Count > 0)
-            {
-                var test = roleAssignmentsTask.First();
-                logger.LogInformation("Found {count} of Role Assignment/s", roleAssignmentsTask.Count);
-                logger.LogInformation("Role Assignment: Id={Id}, RoleDefinitionId={RoleDefinitionId}, PrincipalId={PrincipalId}, Scope={Scope}",
-                    test.Id, test.RoleDefinitionId, test.PrincipalId, test.Scope);
+            //if (roleAssignmentsTask.Count > 0)
+            //{
+            //    var test = roleAssignmentsTask.First();
+            //    logger.LogInformation("Found {count} of Role Assignment/s", roleAssignmentsTask.Count);
+            //    logger.LogInformation("Role Assignment: Id={Id}, RoleDefinitionId={RoleDefinitionId}, PrincipalId={PrincipalId}, Scope={Scope}",
+            //        test.Id, test.RoleDefinitionId, test.PrincipalId, test.Scope);
 
 
-                //roleAssignmentsTask.ForEach(ra =>
-                //    //logger.LogInformation("Role Assignment: Id={Id}, RoleDefinitionId={RoleDefinitionId}, PrincipalId={PrincipalId}, Scope={Scope}, RoleName={RoleName}",
-                //    //ra.Id, ra.RoleDefinitionId, ra.PrincipalId, ra.Scope, ra.RoleName)
+            //    //roleAssignmentsTask.ForEach(ra =>
+            //    //    //logger.LogInformation("Role Assignment: Id={Id}, RoleDefinitionId={RoleDefinitionId}, PrincipalId={PrincipalId}, Scope={Scope}, RoleName={RoleName}",
+            //    //    //ra.Id, ra.RoleDefinitionId, ra.PrincipalId, ra.Scope, ra.RoleName)
 
-                //    logger.LogInformation("PrincipalId={PrincipalId}, RoleName={RoleName}",
-                //    ra.PrincipalId, ra.RoleName)
-                //    );
+            //    //    logger.LogInformation("PrincipalId={PrincipalId}, RoleName={RoleName}",
+            //    //    ra.PrincipalId, ra.RoleName)
+            //    //    );
 
-            }
-            else
-            {
-                logger.LogWarning("No role assignments found");
-            }
-            //// Initialize Neo4j database schema
+            //}
+            //else
+            //{
+            //    logger.LogWarning("No role assignments found");
+            //}
+            // Initialize Neo4j database schema
             //await neo4jService.InitializeDatabaseAsync();
 
-            //// Fetch data from Azure
-            //logger.LogInformation("=== Fetching data from Azure ===");
+            // Fetch data from Azure
+            logger.LogInformation("=== Fetching data from Azure ===");
 
-            //var appRegistrationsTask = azureDataService.FetchAppRegistrationsAsync();
+            var appRegistrationsTask = azureDataService.FetchAppRegistrationsAsync();
+            var apps = await appRegistrationsTask;
+            logger.LogInformation("Found {count} of App Registration/s", apps.Count);
+
+
             //var enterpriseAppsTask = azureDataService.FetchEnterpriseApplicationsAsync();
             //var securityGroupsTask = azureDataService.FetchSecurityGroupsAsync();
             //var roleAssignmentsTask = azureDataService.FetchRoleAssignmentsAsync();
