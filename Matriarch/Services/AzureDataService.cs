@@ -19,11 +19,27 @@ public class AzureDataService
     private readonly GraphServiceClient _graphClient;
     private readonly TokenCredential _credential;
     private readonly HttpClient _httpClient;
+    private readonly CachingService _cachingService;
+    private readonly List<AzureRoleAssignment> _roleAssignments = [];
     private const string ResourceGraphApiEndpoint = "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01";
+    private const string _query = @"
+                authorizationresources
+                | where type =~ 'microsoft.authorization/roleassignments'
+                | extend principalType = tostring(properties['principalType'])
+                | extend principalId = tostring(properties['principalId'])
+                | extend roleDefinitionId = tolower(tostring(properties['roleDefinitionId']))
+                | extend scope = tostring(properties['scope'])
+                | join kind=inner ( 
+                    authorizationresources
+                    | where type =~ 'microsoft.authorization/roledefinitions'
+                    | extend id = tolower(id), roleName = tostring(properties['roleName'])
+                ) on $left.roleDefinitionId == $right.id
+                | project id, principalId, principalType, roleDefinitionId, roleName, scope";
 
-    public AzureDataService(AppSettings settings, ILogger<AzureDataService> logger)
+    public AzureDataService(AppSettings settings, ILogger<AzureDataService> logger, CachingService cachingService)
     {
         _logger = logger;
+        _cachingService = cachingService;
 
         // Use ClientSecretCredential for authentication
         _credential = new ClientSecretCredential(
@@ -40,29 +56,21 @@ public class AzureDataService
 
     public async Task<List<AzureRoleAssignment>> FetchRoleAssignmentsAsync()
     {
+        const string cacheKey = "RoleAssignments";
+        
+        // Try to get cached data first
+        var cachedData = await _cachingService.GetCachedDataAsync<List<AzureRoleAssignment>>(cacheKey);
+        if (cachedData != null)
+        {
+            _logger.LogInformation($"Using cached role assignments ({cachedData.Count} items)");
+            return cachedData;
+        }
+
         _logger.LogInformation("Fetching role assignments from Azure Resource Graph API for all subscriptions...");
-        var roleAssignments = new List<AzureRoleAssignment>();
 
         try
         {
-            // Get access token for Azure Resource Manager
-            var tokenRequestContext = new TokenRequestContext(new[] { "https://management.azure.com/.default" });
-            var token = await _credential.GetTokenAsync(tokenRequestContext, default);
-
-            // Query to fetch all role assignments across all accessible subscriptions
-            var query = @"
-                authorizationresources
-                | where type =~ 'microsoft.authorization/roleassignments'
-                | extend principalType = tostring(properties['principalType'])
-                | extend principalId = tostring(properties['principalId'])
-                | extend roleDefinitionId = tolower(tostring(properties['roleDefinitionId']))
-                | extend scope = tostring(properties['scope'])
-                | join kind=inner ( 
-                    authorizationresources
-                    | where type =~ 'microsoft.authorization/roledefinitions'
-                    | extend id = tolower(id), roleName = tostring(properties['roleName'])
-                ) on $left.roleDefinitionId == $right.id
-                | project id, principalId, principalType, roleDefinitionId, roleName, scope";
+            var token = await GetAuthorizationToken();
 
             string? skipToken = null;
             int pageCount = 0;
@@ -70,77 +78,19 @@ public class AzureDataService
             do
             {
                 pageCount++;
-                _logger.LogInformation($"Fetching page {pageCount} of role assignments...");
+                _logger.LogInformation("Fetching page {pageCount} of role assignments...", pageCount);
 
-                // Create the request payload
-                var requestBody = new Dictionary<string, object>
-                {
-                    ["query"] = query,
-                    ["options"] = new Dictionary<string, object>
-                    {
-                        ["resultFormat"] = "objectArray",
-                        ["$top"] = 1000  // Maximum page size
-                    }
-                };
+                var responseDocument = await FetchRoleAssignmentsPageData(token, skipToken);
+                var pageOfRoleAssignments = ParseResponse(responseDocument).ToList();
+                _roleAssignments.AddRange(pageOfRoleAssignments);
 
-                // Add skipToken if we have one (for pagination)
-                if (!string.IsNullOrEmpty(skipToken))
-                {
-                    ((Dictionary<string, object>)requestBody["options"])["$skipToken"] = skipToken;
-                }
-
-                var jsonContent = JsonSerializer.Serialize(requestBody);
-                var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
-
-                // Set up the HTTP request
-                var request = new HttpRequestMessage(HttpMethod.Post, ResourceGraphApiEndpoint);
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
-                request.Content = content;
-
-                // Execute the request
-                var response = await _httpClient.SendAsync(request);
-                response.EnsureSuccessStatusCode();
-
-                var responseContent = await response.Content.ReadAsStringAsync();
-                var responseDocument = JsonDocument.Parse(responseContent);
-
-                // Parse the response
-                if (responseDocument.RootElement.TryGetProperty("data", out var dataElement))
-                {
-                    if (dataElement.ValueKind == JsonValueKind.Array)
-                    {
-                        int rowsInPage = 0;
-                        foreach (var row in dataElement.EnumerateArray())
-                        {
-                            if (row.ValueKind == JsonValueKind.Object)
-                            {
-                                roleAssignments.Add(new AzureRoleAssignment
-                                {
-                                    Id = row.TryGetProperty("id", out var idProp) ? idProp.GetString() ?? string.Empty : string.Empty,
-                                    PrincipalId = row.TryGetProperty("principalId", out var principalIdProp) ? principalIdProp.GetString() ?? string.Empty : string.Empty,
-                                    PrincipalType = row.TryGetProperty("principalType", out var principalTypeProp) ? principalTypeProp.GetString() ?? string.Empty : string.Empty,
-                                    RoleDefinitionId = row.TryGetProperty("roleDefinitionId", out var roleDefProp) ? roleDefProp.GetString() ?? string.Empty : string.Empty,
-                                    RoleName = row.TryGetProperty("roleName", out var roleNameProp) ? roleNameProp.GetString() ?? string.Empty : string.Empty,
-                                    Scope = row.TryGetProperty("scope", out var scopeProp) ? scopeProp.GetString() ?? string.Empty : string.Empty
-                                });
-                                rowsInPage++;
-                            }
-                        }
-                        _logger.LogInformation($"Fetched {rowsInPage} role assignments from page {pageCount}");
-                    }
-                }
-
-                // Check for continuation token
-                skipToken = null;
-                if (responseDocument.RootElement.TryGetProperty("$skipToken", out var skipTokenElement))
-                {
-                    skipToken = skipTokenElement.GetString();
-                    _logger.LogInformation($"More results available, continuing to next page...");
-                }
+                skipToken = GetContinuationToken(responseDocument);
 
             } while (!string.IsNullOrEmpty(skipToken));
 
-            _logger.LogInformation($"Fetched {roleAssignments.Count} total role assignments from all accessible subscriptions across {pageCount} page(s)");
+            _logger.LogInformation("Fetched {RoleAssignmentsCount} total role assignments from all accessible subscriptions across {PageCount} page(s)", _roleAssignments.Count, pageCount);
+
+            await _cachingService.SetCachedDataAsync(cacheKey, _roleAssignments);
         }
         catch (HttpRequestException ex)
         {
@@ -151,7 +101,89 @@ public class AzureDataService
             _logger.LogError(ex, "Error fetching role assignments from Resource Graph API");
         }
 
-        return roleAssignments;
+        return _roleAssignments;
+    }
+
+    private string? GetContinuationToken(JsonDocument responseDocument)
+    {
+        if (responseDocument.RootElement.TryGetProperty("$skipToken", out var skipTokenElement))
+        {
+            _logger.LogInformation($"More results available, continuing to next page...");
+            return skipTokenElement.GetString();
+        }
+
+        return null;
+    }
+
+    private async Task<AccessToken> GetAuthorizationToken()
+    {
+        var tokenRequestContext = new TokenRequestContext(["https://management.azure.com/.default"]);
+        var token = await _credential.GetTokenAsync(tokenRequestContext, default);
+        return token;
+    }
+
+    private async Task<JsonDocument> FetchRoleAssignmentsPageData(AccessToken token, string? skipToken)
+    {
+        // Create the request payload
+        var requestBody = new Dictionary<string, object>
+        {
+            ["query"] = _query,
+            ["options"] = new Dictionary<string, object>
+            {
+                ["resultFormat"] = "objectArray",
+                ["$top"] = 1000  // Maximum page size
+            }
+        };
+
+        // Add skipToken if we have one (for pagination)
+        if (!string.IsNullOrEmpty(skipToken))
+        {
+            ((Dictionary<string, object>)requestBody["options"])["$skipToken"] = skipToken;
+        }
+
+        var jsonContent = JsonSerializer.Serialize(requestBody);
+        var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+        // Set up the HTTP request
+        var request = new HttpRequestMessage(HttpMethod.Post, ResourceGraphApiEndpoint);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
+        request.Content = content;
+
+        // Execute the request
+        var response = await _httpClient.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+
+        var responseContent = await response.Content.ReadAsStringAsync();
+        var responseDocument = JsonDocument.Parse(responseContent);
+        return responseDocument;
+    }
+
+    private static IEnumerable<AzureRoleAssignment> ParseResponse(JsonDocument responseDocument)
+    {
+        if (!responseDocument.RootElement.TryGetProperty("data", out var dataElement))
+        {
+            yield break;
+        }
+        if (dataElement.ValueKind != JsonValueKind.Array)
+        {
+            yield break;
+        }
+        foreach (var row in dataElement.EnumerateArray())
+        {
+            if (row.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+            yield return new AzureRoleAssignment
+            {
+                Id = row.TryGetProperty("id", out var idProp) ? idProp.GetString() ?? string.Empty : string.Empty,
+                PrincipalId = row.TryGetProperty("principalId", out var principalIdProp) ? principalIdProp.GetString() ?? string.Empty : string.Empty,
+                PrincipalType = row.TryGetProperty("principalType", out var principalTypeProp) ? principalTypeProp.GetString() ?? string.Empty : string.Empty,
+                RoleDefinitionId = row.TryGetProperty("roleDefinitionId", out var roleDefProp) ? roleDefProp.GetString() ?? string.Empty : string.Empty,
+                RoleName = row.TryGetProperty("roleName", out var roleNameProp) ? roleNameProp.GetString() ?? string.Empty : string.Empty,
+                Scope = row.TryGetProperty("scope", out var scopeProp) ? scopeProp.GetString() ?? string.Empty : string.Empty
+            };
+        }
     }
 
     public async Task<List<EnterpriseApplication>> FetchEnterpriseApplicationsAsync()
