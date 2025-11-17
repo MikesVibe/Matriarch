@@ -104,17 +104,6 @@ public class AzureDataService
         return _roleAssignments;
     }
 
-    private string? GetContinuationToken(JsonDocument responseDocument)
-    {
-        if (responseDocument.RootElement.TryGetProperty("$skipToken", out var skipTokenElement))
-        {
-            _logger.LogInformation($"More results available, continuing to next page...");
-            return skipTokenElement.GetString();
-        }
-
-        return null;
-    }
-
     public async Task<List<EnterpriseApplication>> FetchEnterpriseApplicationsAsync()
     {
         const string cacheKey = "EnterpriseApplications";
@@ -128,55 +117,71 @@ public class AzureDataService
         }
 
         _logger.LogInformation("Fetching enterprise applications from Microsoft Graph...");
-        var enterpriseApps = new List<EnterpriseApplication>();
+        var allEnterpriseApps = new List<EnterpriseApplication>();
 
         try
         {
-            var servicePrincipals = await _graphClient.ServicePrincipals.GetAsync();
-            
-            if (servicePrincipals?.Value != null)
+            var servicePrincipalsPage = await _graphClient.ServicePrincipals.GetAsync(requestConfiguration =>
             {
-                foreach (var sp in servicePrincipals.Value)
-                {
-                    var app = new EnterpriseApplication
-                    {
-                        Id = sp.Id ?? string.Empty,
-                        AppId = sp.AppId ?? string.Empty,
-                        DisplayName = sp.DisplayName ?? string.Empty
-                    };
+                requestConfiguration.QueryParameters.Top = 999; // Maximum page size for Graph API
+            });
 
-                    // Fetch group memberships
-                    try
-                    {
-                        var memberOf = await _graphClient.ServicePrincipals[sp.Id].MemberOf.GetAsync();
-                        if (memberOf?.Value != null)
-                        {
-                            app.GroupMemberships = memberOf.Value
-                                .Where(m => m is Group)
-                                .Select(m => m.Id ?? string.Empty)
-                                .ToList();
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, $"Error fetching group memberships for {sp.DisplayName}");
-                    }
-
-                    enterpriseApps.Add(app);
-                }
+            if (servicePrincipalsPage is null)
+            {
+                _logger.LogWarning("No service principals found in the tenant.");
+                return allEnterpriseApps;
             }
 
-            _logger.LogInformation($"Fetched {enterpriseApps.Count} enterprise applications");
-            
+            int pageCount = 0;
+            int processedCount = 0;
+
+            var pageIterator = PageIterator<ServicePrincipal, ServicePrincipalCollectionResponse>
+                .CreatePageIterator(
+                    _graphClient,
+                    servicePrincipalsPage,
+                    sp =>
+                    {
+                        try
+                        {
+                            processedCount++;
+                            var enterpriseApp = new EnterpriseApplication
+                            {
+                                Id = sp.Id ?? string.Empty,
+                                AppId = sp.AppId ?? string.Empty,
+                                DisplayName = sp.DisplayName ?? string.Empty
+                            };
+                            allEnterpriseApps.Add(enterpriseApp);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Error processing service principal {DisplayName}", sp.DisplayName);
+                        }
+
+                        return true; // Continue iterating
+                    },
+                    req =>
+                    {
+                        pageCount++;
+                        _logger.LogInformation("Fetching page {PageCount} of service principals...", pageCount);
+                        return req;
+                    });
+
+            await pageIterator.IterateAsync();
+
+            _logger.LogInformation("Fetched {EnterpriseAppsCount} total enterprise applications across {PageCount} page(s)", allEnterpriseApps.Count, pageCount);
+
+            // Note: Group memberships are not fetched here automatically
+            // Call FetchGroupMembershipsForLinkedAppsAsync separately for specific apps
+
             // Cache the fetched data
-            await _cachingService.SetCachedDataAsync(cacheKey, enterpriseApps);
+            await _cachingService.SetCachedDataAsync(cacheKey, allEnterpriseApps);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error fetching enterprise applications");
         }
 
-        return enterpriseApps;
+        return allEnterpriseApps;
     }
 
     public async Task<List<AppRegistration>> FetchAppRegistrationsAsync()
@@ -250,7 +255,7 @@ public class AzureDataService
     public async Task<List<SecurityGroup>> FetchSecurityGroupsAsync()
     {
         const string cacheKey = "SecurityGroups";
-        
+
         // Try to get cached data first
         var cachedData = await _cachingService.GetCachedDataAsync<List<SecurityGroup>>(cacheKey);
         if (cachedData != null)
@@ -264,25 +269,60 @@ public class AzureDataService
 
         try
         {
-            var groups = await _graphClient.Groups.GetAsync(config =>
+            var groupsPage = await _graphClient.Groups.GetAsync(config =>
             {
                 config.QueryParameters.Filter = "securityEnabled eq true";
+                config.QueryParameters.Top = 999; // Maximum page size for Graph API
             });
-            
-            if (groups?.Value != null)
+
+            if (groupsPage is null)
             {
-                foreach (var group in groups.Value)
-                {
-                    securityGroups.Add(new SecurityGroup
-                    {
-                        Id = group.Id ?? string.Empty,
-                        DisplayName = group.DisplayName ?? string.Empty,
-                        Description = group.Description
-                    });
-                }
+                _logger.LogWarning("No security groups found in the tenant.");
+                return securityGroups;
             }
 
-            _logger.LogInformation($"Fetched {securityGroups.Count} security groups");
+            int pageCount = 0;
+            int processedCount = 0;
+
+            var pageIterator = PageIterator<Group, GroupCollectionResponse>
+                .CreatePageIterator(
+                    _graphClient,
+                    groupsPage,
+                    group =>
+                    {
+                        try
+                        {
+                            processedCount++;
+                            var securityGroup = new SecurityGroup
+                            {
+                                Id = group.Id ?? string.Empty,
+                                DisplayName = group.DisplayName ?? string.Empty,
+                                Description = group.Description
+                            };
+
+                            securityGroups.Add(securityGroup);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "Error processing security group {DisplayName}", group.DisplayName);
+                        }
+
+                        return true; // Continue iterating
+                    },
+                    req =>
+                    {
+                        pageCount++;
+                        _logger.LogInformation("Fetching page {PageCount} of security groups...", pageCount);
+                        return req;
+                    });
+
+            await pageIterator.IterateAsync();
+
+            _logger.LogInformation("Fetched {SecurityGroupsCount} total security groups across {PageCount} page(s)", 
+                securityGroups.Count, pageCount);
+
+            // Fetch members for all security groups
+            //await FetchMembersForSecurityGroups(securityGroups);
             
             // Cache the fetched data
             await _cachingService.SetCachedDataAsync(cacheKey, securityGroups);
@@ -293,6 +333,118 @@ public class AzureDataService
         }
 
         return securityGroups;
+    }
+
+    private string? GetContinuationToken(JsonDocument responseDocument)
+    {
+        if (responseDocument.RootElement.TryGetProperty("$skipToken", out var skipTokenElement))
+        {
+            _logger.LogInformation($"More results available, continuing to next page...");
+            return skipTokenElement.GetString();
+        }
+
+        return null;
+    }
+
+    public async Task FetchMembersForSecurityGroupsAsync(List<SecurityGroup> groups)
+    {
+        const string cacheKey = "SecurityGroupMembers";
+        
+        // Try to get cached data first
+        var cachedMembers = await _cachingService.GetCachedDataAsync<Dictionary<string, List<string>>>(cacheKey);
+        
+        if (cachedMembers != null)
+        {
+            _logger.LogInformation($"Using cached members for {cachedMembers.Count} security groups");
+            
+            // Apply cached members to the groups
+            int matchedCount = 0;
+            int cachedMemberCount = 0;
+            foreach (var group in groups)
+            {
+                if (cachedMembers.TryGetValue(group.Id, out var members))
+                {
+                    group.Members = members;
+                    matchedCount++;
+                    cachedMemberCount += members.Count;
+                }
+                else
+                {
+                    group.Members = [];
+                }
+            }
+            
+            _logger.LogInformation($"Applied cached members to {matchedCount}/{groups.Count} security groups. Total members: {cachedMemberCount}");
+            return;
+        }
+
+        _logger.LogInformation("Fetching members for {Count} security groups...", groups.Count);
+        int processedCount = 0;
+        int errorCount = 0;
+        int totalMembers = 0;
+        var membersDictionary = new Dictionary<string, List<string>>();
+
+        foreach (var group in groups)
+        {
+            try
+            {
+                processedCount++;
+                var membersPage = await _graphClient.Groups[group.Id].Members.GetAsync(config =>
+                {
+                    config.QueryParameters.Top = 999;
+                });
+
+                if (membersPage is null)
+                {
+                    group.Members = [];
+                    membersDictionary[group.Id] = [];
+                    continue;
+                }
+
+                var memberIds = new List<string>();
+
+                // Use PageIterator to handle pagination for members
+                var memberPageIterator = PageIterator<DirectoryObject, DirectoryObjectCollectionResponse>
+                    .CreatePageIterator(
+                        _graphClient,
+                        membersPage,
+                        member =>
+                        {
+                            if (!string.IsNullOrEmpty(member.Id))
+                            {
+                                memberIds.Add(member.Id);
+                                totalMembers++;
+                            }
+                            return true;
+                        });
+
+                await memberPageIterator.IterateAsync();
+                group.Members = memberIds;
+                membersDictionary[group.Id] = memberIds;
+
+                if (processedCount % 50 == 0)
+                {
+                    _logger.LogInformation("Fetched members for {ProcessedCount}/{TotalCount} security groups. Total members so far: {TotalMembers}",
+                        processedCount, groups.Count, totalMembers);
+                }
+            }
+            catch (Exception ex)
+            {
+                errorCount++;
+                _logger.LogWarning(ex, "Error fetching members for security group {DisplayName} (ID: {Id})",
+                    group.DisplayName, group.Id);
+
+                // Continue processing other groups even if one fails
+                group.Members = [];
+                membersDictionary[group.Id] = [];
+            }
+        }
+
+        _logger.LogInformation("Completed fetching group members. Processed: {ProcessedCount}, Errors: {ErrorCount}, Total Members: {TotalMembers}",
+            processedCount, errorCount, totalMembers);
+        
+        // Cache the fetched members
+        await _cachingService.SetCachedDataAsync(cacheKey, membersDictionary);
     }
 
     private async Task<AccessToken> GetAuthorizationToken()
@@ -364,5 +516,104 @@ public class AzureDataService
                 Scope = row.TryGetProperty("scope", out var scopeProp) ? scopeProp.GetString() ?? string.Empty : string.Empty
             };
         }
+    }
+
+    public async Task FetchGroupMembershipsForLinkedAppsAsync(List<EnterpriseApplication> apps)
+    {
+        const string cacheKey = "GroupMemberships";
+        
+        // Try to get cached data first
+        var cachedMemberships = await _cachingService.GetCachedDataAsync<Dictionary<string, List<string>>>(cacheKey);
+        
+        if (cachedMemberships != null)
+        {
+            _logger.LogInformation($"Using cached group memberships for {cachedMemberships.Count} applications");
+            
+            // Apply cached memberships to the apps
+            int matchedCount = 0;
+            foreach (var app in apps)
+            {
+                if (cachedMemberships.TryGetValue(app.Id, out var memberships))
+                {
+                    app.GroupMemberships = memberships;
+                    matchedCount++;
+                }
+                else
+                {
+                    app.GroupMemberships = [];
+                }
+            }
+            
+            _logger.LogInformation($"Applied cached group memberships to {matchedCount}/{apps.Count} applications");
+            return;
+        }
+
+        _logger.LogInformation("Fetching group memberships for {Count} linked enterprise applications...", apps.Count);
+        int processedCount = 0;
+        int errorCount = 0;
+        int totalMemberships = 0;
+        var membershipsDictionary = new Dictionary<string, List<string>>();
+
+        foreach (var app in apps)
+        {
+            try
+            {
+                processedCount++;
+                var memberOfPage = await _graphClient.ServicePrincipals[app.Id].MemberOf.GetAsync(config =>
+                {
+                    config.QueryParameters.Top = 999;
+                });
+
+                if (memberOfPage is null)
+                {
+                    app.GroupMemberships = [];
+                    membershipsDictionary[app.Id] = [];
+                    continue;
+                }
+
+                var groupIds = new List<string>();
+
+                // Use PageIterator to handle pagination for memberOf
+                var memberOfPageIterator = PageIterator<DirectoryObject, DirectoryObjectCollectionResponse>
+                    .CreatePageIterator(
+                        _graphClient,
+                        memberOfPage,
+                        directoryObject =>
+                        {
+                            if (directoryObject is Group group && !string.IsNullOrEmpty(group.Id))
+                            {
+                                groupIds.Add(group.Id);
+                                totalMemberships++;
+                            }
+                            return true;
+                        });
+
+                await memberOfPageIterator.IterateAsync();
+                app.GroupMemberships = groupIds;
+                membershipsDictionary[app.Id] = groupIds;
+
+                if (processedCount % 50 == 0)
+                {
+                    _logger.LogInformation("Fetched group memberships for {ProcessedCount}/{TotalCount} applications. Total memberships so far: {TotalMemberships}", 
+                        processedCount, apps.Count, totalMemberships);
+                }
+            }
+            catch (Exception ex)
+            {
+                errorCount++;
+                _logger.LogWarning(ex, "Error fetching group memberships for {DisplayName} (ID: {Id})", 
+                    app.DisplayName, app.Id);
+                
+                // Continue processing other apps even if one fails
+                app.GroupMemberships = [];
+                membershipsDictionary[app.Id] = [];
+            }
+        }
+
+        _logger.LogInformation("Completed fetching group memberships. Processed: {ProcessedCount}, Errors: {ErrorCount}, Total Memberships: {TotalMemberships}", 
+            processedCount, errorCount, totalMemberships);
+        
+        // Cache the fetched memberships
+        await _cachingService.SetCachedDataAsync(cacheKey, membershipsDictionary);
     }
 }

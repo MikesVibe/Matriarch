@@ -295,6 +295,74 @@ public class Neo4jService : IAsyncDisposable
         _logger.LogInformation("Group memberships stored successfully");
     }
 
+    public async Task StoreSecurityGroupMembersAsync(List<SecurityGroup> securityGroups)
+    {
+        _logger.LogInformation("Storing security group members in Neo4j...");
+        
+        await using var session = _driver.AsyncSession();
+        int totalRelationships = 0;
+        
+        foreach (var group in securityGroups)
+        {
+            if (group.Members.Count == 0) continue;
+            
+            try
+            {
+                await session.ExecuteWriteAsync(async tx =>
+                {
+                    foreach (var memberId in group.Members)
+                    {
+                        // Try to link to EnterpriseApp
+                        var result = await tx.RunAsync(@"
+                            MATCH (g:SecurityGroup {id: $groupId})
+                            OPTIONAL MATCH (e:EnterpriseApp {id: $memberId})
+                            OPTIONAL MATCH (u:User {id: $memberId})
+                            OPTIONAL MATCH (nested:SecurityGroup {id: $memberId})
+                            WITH g, e, u, nested, $memberId as memberId
+                            WHERE e IS NOT NULL OR u IS NOT NULL OR nested IS NOT NULL
+                            FOREACH (_ IN CASE WHEN e IS NOT NULL THEN [1] ELSE [] END |
+                                MERGE (e)-[:MEMBER_OF]->(g)
+                            )
+                            FOREACH (_ IN CASE WHEN u IS NOT NULL THEN [1] ELSE [] END |
+                                MERGE (u)-[:MEMBER_OF]->(g)
+                            )
+                            FOREACH (_ IN CASE WHEN nested IS NOT NULL THEN [1] ELSE [] END |
+                                MERGE (nested)-[:MEMBER_OF]->(g)
+                            )
+                            RETURN CASE 
+                                WHEN e IS NOT NULL OR u IS NOT NULL OR nested IS NOT NULL THEN 1 
+                                ELSE 0 
+                            END as created
+                        ", new
+                        {
+                            groupId = group.Id,
+                            memberId
+                        });
+
+                        var record = await result.SingleAsync();
+                        if (record["created"].As<int>() == 1)
+                        {
+                            totalRelationships++;
+                        }
+                    }
+                });
+
+                if (group.Members.Count > 0)
+                {
+                    _logger.LogDebug("Stored {MemberCount} members for group {GroupName}", 
+                        group.Members.Count, group.DisplayName);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error storing members for security group {DisplayName}", group.DisplayName);
+            }
+        }
+
+        _logger.LogInformation("Security group members stored successfully. Total relationships created: {TotalRelationships}", 
+            totalRelationships);
+    }
+
     public async ValueTask DisposeAsync()
     {
         await _driver.DisposeAsync();

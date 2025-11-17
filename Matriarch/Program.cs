@@ -25,7 +25,12 @@ class Program
         {
             builder
                 .AddConfiguration(configuration.GetSection("Logging"))
-                .AddConsole();
+                .AddSimpleConsole(options =>
+                {
+                    options.SingleLine = true;
+                    options.IncludeScopes = false;
+                    options.TimestampFormat = "HH:mm:ss ";
+                });
         });
 
         var logger = loggerFactory.CreateLogger<Program>();
@@ -42,72 +47,62 @@ class Program
             var azureDataService = new AzureDataService(settings, loggerFactory.CreateLogger<AzureDataService>(), cachingService);
             var neo4jService = new Neo4jService(settings, loggerFactory.CreateLogger<Neo4jService>());
 
-
-            //var roleAssignmentsTask = await azureDataService.FetchRoleAssignmentsAsync();
-
-            //if (roleAssignmentsTask.Count > 0)
-            //{
-            //    var test = roleAssignmentsTask.First();
-            //    logger.LogInformation("Found {count} of Role Assignment/s", roleAssignmentsTask.Count);
-            //    logger.LogInformation("Role Assignment: Id={Id}, RoleDefinitionId={RoleDefinitionId}, PrincipalId={PrincipalId}, Scope={Scope}",
-            //        test.Id, test.RoleDefinitionId, test.PrincipalId, test.Scope);
-
-
-            //    //roleAssignmentsTask.ForEach(ra =>
-            //    //    //logger.LogInformation("Role Assignment: Id={Id}, RoleDefinitionId={RoleDefinitionId}, PrincipalId={PrincipalId}, Scope={Scope}, RoleName={RoleName}",
-            //    //    //ra.Id, ra.RoleDefinitionId, ra.PrincipalId, ra.Scope, ra.RoleName)
-
-            //    //    logger.LogInformation("PrincipalId={PrincipalId}, RoleName={RoleName}",
-            //    //    ra.PrincipalId, ra.RoleName)
-            //    //    );
-
-            //}
-            //else
-            //{
-            //    logger.LogWarning("No role assignments found");
-            //}
-            // Initialize Neo4j database schema
-            //await neo4jService.InitializeDatabaseAsync();
+            //Initialize Neo4j database schema
+            await neo4jService.InitializeDatabaseAsync();
 
             // Fetch data from Azure
             logger.LogInformation("=== Fetching data from Azure ===");
 
-            var appRegistrationsTask = azureDataService.FetchAppRegistrationsAsync();
-            var apps = await appRegistrationsTask;
-            logger.LogInformation("Found {count} of App Registration/s", apps.Count);
+            var roleAssignments = await azureDataService.FetchRoleAssignmentsAsync();
+            logger.LogInformation("Found {count} of Role Assignment/s", roleAssignments.Count);
 
+            var appRegistrations = await azureDataService.FetchAppRegistrationsAsync();
+            logger.LogInformation("Found {count} of App Registration/s", appRegistrations.Count);
 
-            //var enterpriseAppsTask = azureDataService.FetchEnterpriseApplicationsAsync();
-            //var securityGroupsTask = azureDataService.FetchSecurityGroupsAsync();
-            //var roleAssignmentsTask = azureDataService.FetchRoleAssignmentsAsync();
+            logger.LogInformation("Starting to fetch enterprise applications...");
+            var enterpriseApps = await azureDataService.FetchEnterpriseApplicationsAsync();
+            logger.LogInformation("Successfully fetched {Count} enterprise applications", enterpriseApps.Count);
 
-            //await Task.WhenAll(appRegistrationsTask, enterpriseAppsTask, securityGroupsTask, roleAssignmentsTask);
+            var securityGroups = await azureDataService.FetchSecurityGroupsAsync();
+            logger.LogInformation("Found {count} of Security Group/s", securityGroups.Count);
 
-            //var appRegistrations = await appRegistrationsTask;
-            //var enterpriseApps = await enterpriseAppsTask;
-            //var securityGroups = await securityGroupsTask;
-            //var roleAssignments = await roleAssignmentsTask;
+            // Fetch members for security groups
+            await azureDataService.FetchMembersForSecurityGroupsAsync(securityGroups);
+            logger.LogInformation("Fetched members for {count} security groups", securityGroups.Count);
 
-            //// Link service principal IDs to app registrations
-            //LinkAppRegistrationsToEnterpriseApps(appRegistrations, enterpriseApps, logger);
+            // Link service principal IDs to app registrations
+            var linkedAppsDict = LinkAppRegistrationsToEnterpriseApps(appRegistrations, enterpriseApps, logger);
 
-            //// Store data in Neo4j
-            //logger.LogInformation("=== Storing data in Neo4j ===");
+            // Fetch group memberships only for enterprise apps linked to app registrations
+            if (linkedAppsDict.Count > 0)
+            {
+                var linkedEnterpriseApps = linkedAppsDict.Values.Select(pair => pair.EnterpriseApp).ToList();
+                logger.LogInformation("Fetching group memberships for {Count} linked enterprise applications...", linkedEnterpriseApps.Count);
+                await azureDataService.FetchGroupMembershipsForLinkedAppsAsync(linkedEnterpriseApps);
+            }
+            else
+            {
+                logger.LogWarning("No enterprise applications are linked to app registrations");
+            }
+
+            // Store data in Neo4j
+            logger.LogInformation("=== Storing data in Neo4j ===");
 
             //await neo4jService.StoreAppRegistrationsAsync(appRegistrations);
             //await neo4jService.StoreSecurityGroupsAsync(securityGroups);
             //await neo4jService.StoreEnterpriseApplicationsAsync(enterpriseApps);
             //await neo4jService.StoreRoleAssignmentsAsync(roleAssignments, enterpriseApps, securityGroups);
             //await neo4jService.StoreGroupMembershipsAsync(enterpriseApps);
+            //await neo4jService.StoreSecurityGroupMembersAsync(securityGroups);
 
-            //logger.LogInformation("=== Data integration completed successfully ===");
-            //logger.LogInformation($"Summary:");
-            //logger.LogInformation($"  - App Registrations: {appRegistrations.Count}");
-            //logger.LogInformation($"  - Enterprise Applications: {enterpriseApps.Count}");
-            //logger.LogInformation($"  - Security Groups: {securityGroups.Count}");
-            //logger.LogInformation($"  - Role Assignments: {roleAssignments.Count}");
+            logger.LogInformation("=== Data integration completed successfully ===");
+            logger.LogInformation($"Summary:");
+            logger.LogInformation($"  - App Registrations: {appRegistrations.Count}");
+            logger.LogInformation($"  - Enterprise Applications: {enterpriseApps.Count}");
+            logger.LogInformation($"  - Security Groups: {securityGroups.Count}");
+            logger.LogInformation($"  - Role Assignments: {roleAssignments.Count}");
 
-            //await neo4jService.DisposeAsync();
+            await neo4jService.DisposeAsync();
         }
         catch (Exception ex)
         {
@@ -145,7 +140,7 @@ class Program
         }
     }
 
-    private static void LinkAppRegistrationsToEnterpriseApps(
+    private static Dictionary<string, (Models.AppRegistration AppRegistration, Models.EnterpriseApplication EnterpriseApp)> LinkAppRegistrationsToEnterpriseApps(
         List<Models.AppRegistration> appRegistrations,
         List<Models.EnterpriseApplication> enterpriseApps,
         ILogger logger)
@@ -153,15 +148,19 @@ class Program
         logger.LogInformation("Linking app registrations to enterprise applications...");
 
         var enterpriseAppsByAppId = enterpriseApps.ToDictionary(e => e.AppId, e => e);
+        var linkedApps = new Dictionary<string, (Models.AppRegistration AppRegistration, Models.EnterpriseApplication EnterpriseApp)>();
 
         foreach (var appReg in appRegistrations)
         {
             if (enterpriseAppsByAppId.TryGetValue(appReg.AppId, out var enterpriseApp))
             {
                 appReg.ServicePrincipalId = enterpriseApp.Id;
+                linkedApps[appReg.AppId] = (appReg, enterpriseApp);
             }
         }
 
-        logger.LogInformation($"Linked {appRegistrations.Count(a => a.ServicePrincipalId != null)} app registrations to enterprise applications");
+        logger.LogInformation($"Linked {linkedApps.Count} app registrations to enterprise applications");
+
+        return linkedApps;
     }
 }

@@ -42,5 +42,6 @@ public class SecurityGroup
     public string Id { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public List<string> Members { get; set; } = new();
     public List<RoleAssignment> RoleAssignments { get; set; } = new();
 }
