@@ -1,6 +1,6 @@
 namespace Matriarch.Models;
 
-public class RoleAssignment
+public class RoleAssignmentDto
 {
     public string Id { get; set; } = string.Empty;
     public string PrincipalId { get; set; } = string.Empty;
@@ -10,25 +10,25 @@ public class RoleAssignment
     public string Scope { get; set; } = string.Empty;
 }
 
-public class EnterpriseApplication
+public class EnterpriseApplicationDto
 {
     public string Id { get; set; } = string.Empty;
     public string AppId { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public List<string> GroupMemberships { get; set; } = new();
-    public List<RoleAssignment> RoleAssignments { get; set; } = new();
+    public List<RoleAssignmentDto> RoleAssignments { get; set; } = new();
 }
 
-public class AppRegistration
+public class AppRegistrationDto
 {
     public string Id { get; set; } = string.Empty;
     public string AppId { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
-    public List<FederatedCredential> FederatedCredentials { get; set; } = new();
+    public List<FederatedCredentialDto> FederatedCredentials { get; set; } = new();
     public string? ServicePrincipalId { get; set; }
 }
 
-public class FederatedCredential
+public class FederatedCredentialDto
 {
     public string Id { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
@@ -37,11 +37,29 @@ public class FederatedCredential
     public List<string> Audiences { get; set; } = new();
 }
 
-public class SecurityGroup
+public class GroupMemberDto
+{
+    public string Id { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public MemberType Type { get; set; }
+    public string? UserPrincipalName { get; set; }
+    public string? Mail { get; set; }
+}
+
+public enum MemberType
+{
+    User,
+    Group,
+    ServicePrincipal,
+    Device,
+    Unknown
+}
+
+public class SecurityGroupDto
 {
     public string Id { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public string? Description { get; set; }
-    public List<string> Members { get; set; } = new();
-    public List<RoleAssignment> RoleAssignments { get; set; } = new();
+    public List<GroupMemberDto> Members { get; set; } = new();
+    public List<RoleAssignmentDto> RoleAssignments { get; set; } = new();
 }

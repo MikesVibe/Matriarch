@@ -50,7 +50,7 @@ public class Neo4jService : IAsyncDisposable
         }
     }
 
-    public async Task StoreAppRegistrationsAsync(List<AppRegistration> appRegistrations)
+    public async Task StoreAppRegistrationsAsync(List<AppRegistrationDto> appRegistrations)
     {
         _logger.LogInformation($"Storing {appRegistrations.Count} app registrations in Neo4j...");
         
@@ -106,7 +106,7 @@ public class Neo4jService : IAsyncDisposable
         _logger.LogInformation("App registrations stored successfully");
     }
 
-    public async Task StoreEnterpriseApplicationsAsync(List<EnterpriseApplication> enterpriseApps)
+    public async Task StoreEnterpriseApplicationsAsync(List<EnterpriseApplicationDto> enterpriseApps)
     {
         _logger.LogInformation($"Storing {enterpriseApps.Count} enterprise applications in Neo4j...");
         
@@ -151,7 +151,7 @@ public class Neo4jService : IAsyncDisposable
         _logger.LogInformation("Enterprise applications stored successfully");
     }
 
-    public async Task StoreSecurityGroupsAsync(List<SecurityGroup> securityGroups)
+    public async Task StoreSecurityGroupsAsync(List<SecurityGroupDto> securityGroups)
     {
         _logger.LogInformation($"Storing {securityGroups.Count} security groups in Neo4j...");
         
@@ -184,9 +184,9 @@ public class Neo4jService : IAsyncDisposable
         _logger.LogInformation("Security groups stored successfully");
     }
 
-    public async Task StoreRoleAssignmentsAsync(List<RoleAssignment> roleAssignments, 
-        List<EnterpriseApplication> enterpriseApps, 
-        List<SecurityGroup> securityGroups)
+    public async Task StoreRoleAssignmentsAsync(List<RoleAssignmentDto> roleAssignments, 
+        List<EnterpriseApplicationDto> enterpriseApps, 
+        List<SecurityGroupDto> securityGroups)
     {
         _logger.LogInformation($"Storing {roleAssignments.Count} role assignments in Neo4j...");
         
@@ -258,7 +258,7 @@ public class Neo4jService : IAsyncDisposable
         _logger.LogInformation("Role assignments stored successfully");
     }
 
-    public async Task StoreGroupMembershipsAsync(List<EnterpriseApplication> enterpriseApps)
+    public async Task StoreGroupMembershipsAsync(List<EnterpriseApplicationDto> enterpriseApps)
     {
         _logger.LogInformation("Storing group memberships in Neo4j...");
         
@@ -295,7 +295,7 @@ public class Neo4jService : IAsyncDisposable
         _logger.LogInformation("Group memberships stored successfully");
     }
 
-    public async Task StoreSecurityGroupMembersAsync(List<SecurityGroup> securityGroups)
+    public async Task StoreSecurityGroupMembersAsync(List<SecurityGroupDto> securityGroups)
     {
         _logger.LogInformation("Storing security group members in Neo4j...");
         
@@ -310,9 +310,9 @@ public class Neo4jService : IAsyncDisposable
             {
                 await session.ExecuteWriteAsync(async tx =>
                 {
-                    foreach (var memberId in group.Members)
+                    foreach (var member in group.Members)
                     {
-                        // Try to link to EnterpriseApp
+                        // Try to link to EnterpriseApp, User, or nested SecurityGroup based on member type
                         var result = await tx.RunAsync(@"
                             MATCH (g:SecurityGroup {id: $groupId})
                             OPTIONAL MATCH (e:EnterpriseApp {id: $memberId})
@@ -336,7 +336,7 @@ public class Neo4jService : IAsyncDisposable
                         ", new
                         {
                             groupId = group.Id,
-                            memberId
+                            memberId = member.Id
                         });
 
                         var record = await result.SingleAsync();

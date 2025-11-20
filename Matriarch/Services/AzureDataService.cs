@@ -9,7 +9,7 @@ using System.Text.Json;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
-using AzureRoleAssignment = Matriarch.Models.RoleAssignment;
+using AzureRoleAssignment = Matriarch.Models.RoleAssignmentDto;
 
 namespace Matriarch.Services;
 
@@ -104,12 +104,12 @@ public class AzureDataService
         return _roleAssignments;
     }
 
-    public async Task<List<EnterpriseApplication>> FetchEnterpriseApplicationsAsync()
+    public async Task<List<EnterpriseApplicationDto>> FetchEnterpriseApplicationsAsync()
     {
         const string cacheKey = "EnterpriseApplications";
         
         // Try to get cached data first
-        var cachedData = await _cachingService.GetCachedDataAsync<List<EnterpriseApplication>>(cacheKey);
+        var cachedData = await _cachingService.GetCachedDataAsync<List<EnterpriseApplicationDto>>(cacheKey);
         if (cachedData != null)
         {
             _logger.LogInformation($"Using cached enterprise applications ({cachedData.Count} items)");
@@ -117,7 +117,7 @@ public class AzureDataService
         }
 
         _logger.LogInformation("Fetching enterprise applications from Microsoft Graph...");
-        var allEnterpriseApps = new List<EnterpriseApplication>();
+        var allEnterpriseApps = new List<EnterpriseApplicationDto>();
 
         try
         {
@@ -144,7 +144,7 @@ public class AzureDataService
                         try
                         {
                             processedCount++;
-                            var enterpriseApp = new EnterpriseApplication
+                            var enterpriseApp = new EnterpriseApplicationDto
                             {
                                 Id = sp.Id ?? string.Empty,
                                 AppId = sp.AppId ?? string.Empty,
@@ -184,12 +184,12 @@ public class AzureDataService
         return allEnterpriseApps;
     }
 
-    public async Task<List<AppRegistration>> FetchAppRegistrationsAsync()
+    public async Task<List<AppRegistrationDto>> FetchAppRegistrationsAsync()
     {
         const string cacheKey = "AppRegistrations";
         
         // Try to get cached data first
-        var cachedData = await _cachingService.GetCachedDataAsync<List<AppRegistration>>(cacheKey);
+        var cachedData = await _cachingService.GetCachedDataAsync<List<AppRegistrationDto>>(cacheKey);
         if (cachedData != null)
         {
             _logger.LogInformation($"Using cached app registrations ({cachedData.Count} items)");
@@ -197,7 +197,7 @@ public class AzureDataService
         }
 
         _logger.LogInformation("Fetching app registrations from Microsoft Graph...");
-        var appRegistrations = new List<AppRegistration>();
+        var appRegistrations = new List<AppRegistrationDto>();
 
         try
         {
@@ -221,7 +221,7 @@ public class AzureDataService
                     applicationsPage,
                     app =>
                     {
-                        var appReg = new AppRegistration
+                        var appReg = new AppRegistrationDto
                         {
                             Id = app.Id ?? string.Empty,
                             AppId = app.AppId ?? string.Empty,
@@ -252,12 +252,12 @@ public class AzureDataService
         return appRegistrations;
     }
 
-    public async Task<List<SecurityGroup>> FetchSecurityGroupsAsync()
+    public async Task<List<SecurityGroupDto>> FetchSecurityGroupsAsync()
     {
         const string cacheKey = "SecurityGroups";
 
         // Try to get cached data first
-        var cachedData = await _cachingService.GetCachedDataAsync<List<SecurityGroup>>(cacheKey);
+        var cachedData = await _cachingService.GetCachedDataAsync<List<SecurityGroupDto>>(cacheKey);
         if (cachedData != null)
         {
             _logger.LogInformation($"Using cached security groups ({cachedData.Count} items)");
@@ -265,7 +265,7 @@ public class AzureDataService
         }
 
         _logger.LogInformation("Fetching security groups from Microsoft Graph...");
-        var securityGroups = new List<SecurityGroup>();
+        var securityGroups = new List<SecurityGroupDto>();
 
         try
         {
@@ -293,7 +293,7 @@ public class AzureDataService
                         try
                         {
                             processedCount++;
-                            var securityGroup = new SecurityGroup
+                            var securityGroup = new SecurityGroupDto
                             {
                                 Id = group.Id ?? string.Empty,
                                 DisplayName = group.DisplayName ?? string.Empty,
@@ -346,12 +346,12 @@ public class AzureDataService
         return null;
     }
 
-    public async Task FetchMembersForSecurityGroupsAsync(List<SecurityGroup> groups)
+    public async Task FetchMembersForSecurityGroupsAsync(List<SecurityGroupDto> groups)
     {
         const string cacheKey = "SecurityGroupMembers";
         
         // Try to get cached data first
-        var cachedMembers = await _cachingService.GetCachedDataAsync<Dictionary<string, List<string>>>(cacheKey);
+        var cachedMembers = await _cachingService.GetCachedDataAsync<Dictionary<string, List<GroupMemberDto>>>(cacheKey);
         
         if (cachedMembers != null)
         {
@@ -382,45 +382,18 @@ public class AzureDataService
         int processedCount = 0;
         int errorCount = 0;
         int totalMembers = 0;
-        var membersDictionary = new Dictionary<string, List<string>>();
+        var membersDictionary = new Dictionary<string, List<GroupMemberDto>>();
 
         foreach (var group in groups)
         {
             try
             {
                 processedCount++;
-                var membersPage = await _graphClient.Groups[group.Id].Members.GetAsync(config =>
-                {
-                    config.QueryParameters.Top = 999;
-                });
-
-                if (membersPage is null)
-                {
-                    group.Members = [];
-                    membersDictionary[group.Id] = [];
-                    continue;
-                }
-
-                var memberIds = new List<string>();
-
-                // Use PageIterator to handle pagination for members
-                var memberPageIterator = PageIterator<DirectoryObject, DirectoryObjectCollectionResponse>
-                    .CreatePageIterator(
-                        _graphClient,
-                        membersPage,
-                        member =>
-                        {
-                            if (!string.IsNullOrEmpty(member.Id))
-                            {
-                                memberIds.Add(member.Id);
-                                totalMembers++;
-                            }
-                            return true;
-                        });
-
-                await memberPageIterator.IterateAsync();
-                group.Members = memberIds;
-                membersDictionary[group.Id] = memberIds;
+                var members = await FetchMembersForSingleGroupAsync(group.Id);
+                
+                group.Members = members;
+                membersDictionary[group.Id] = members;
+                totalMembers += members.Count;
 
                 if (processedCount % 50 == 0)
                 {
@@ -445,6 +418,68 @@ public class AzureDataService
         
         // Cache the fetched members
         await _cachingService.SetCachedDataAsync(cacheKey, membersDictionary);
+    }
+
+    private async Task<List<GroupMemberDto>> FetchMembersForSingleGroupAsync(string groupId)
+    {
+        var membersPage = await _graphClient.Groups[groupId].Members.GetAsync(config =>
+        {
+            config.QueryParameters.Top = 999;
+            config.QueryParameters.Select = ["id", "displayName", "userPrincipalName", "mail"];
+        });
+
+        if (membersPage is null)
+        {
+            return [];
+        }
+
+        var memberDtos = new List<GroupMemberDto>();
+
+        // Use PageIterator to handle pagination for members
+        var memberPageIterator = PageIterator<DirectoryObject, DirectoryObjectCollectionResponse>
+            .CreatePageIterator(
+                _graphClient,
+                membersPage,
+                member =>
+                {
+                    if (!string.IsNullOrEmpty(member.Id))
+                    {
+                        var memberDto = new GroupMemberDto
+                        {
+                            Id = member.Id,
+                            DisplayName = member.AdditionalData?.TryGetValue("displayName", out var displayName) == true 
+                                ? displayName?.ToString() ?? string.Empty 
+                                : string.Empty,
+                            Type = DetermineMemberType(member),
+                            UserPrincipalName = member.AdditionalData?.TryGetValue("userPrincipalName", out var upn) == true 
+                                ? upn?.ToString() 
+                                : null,
+                            Mail = member.AdditionalData?.TryGetValue("mail", out var mail) == true 
+                                ? mail?.ToString() 
+                                : null
+                        };
+                        
+                        memberDtos.Add(memberDto);
+                    }
+                    return true;
+                });
+
+        await memberPageIterator.IterateAsync();
+        
+        return memberDtos;
+    }
+
+    private static MemberType DetermineMemberType(DirectoryObject member)
+    {
+        // Check the actual type of the DirectoryObject
+        return member switch
+        {
+            User => MemberType.User,
+            Group => MemberType.Group,
+            ServicePrincipal => MemberType.ServicePrincipal,
+            Device => MemberType.Device,
+            _ => MemberType.Unknown
+        };
     }
 
     private async Task<AccessToken> GetAuthorizationToken()
@@ -518,7 +553,7 @@ public class AzureDataService
         }
     }
 
-    public async Task FetchGroupMembershipsForLinkedAppsAsync(List<EnterpriseApplication> apps)
+    public async Task FetchGroupMembershipsForLinkedAppsAsync(List<EnterpriseApplicationDto> apps)
     {
         const string cacheKey = "GroupMemberships";
         

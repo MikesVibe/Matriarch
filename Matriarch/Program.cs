@@ -140,15 +140,15 @@ class Program
         }
     }
 
-    private static Dictionary<string, (Models.AppRegistration AppRegistration, Models.EnterpriseApplication EnterpriseApp)> LinkAppRegistrationsToEnterpriseApps(
-        List<Models.AppRegistration> appRegistrations,
-        List<Models.EnterpriseApplication> enterpriseApps,
+    private static Dictionary<string, (Models.AppRegistrationDto AppRegistration, Models.EnterpriseApplicationDto EnterpriseApp)> LinkAppRegistrationsToEnterpriseApps(
+        List<Models.AppRegistrationDto> appRegistrations,
+        List<Models.EnterpriseApplicationDto> enterpriseApps,
         ILogger logger)
     {
         logger.LogInformation("Linking app registrations to enterprise applications...");
 
         var enterpriseAppsByAppId = enterpriseApps.ToDictionary(e => e.AppId, e => e);
-        var linkedApps = new Dictionary<string, (Models.AppRegistration AppRegistration, Models.EnterpriseApplication EnterpriseApp)>();
+        var linkedApps = new Dictionary<string, (Models.AppRegistrationDto AppRegistration, Models.EnterpriseApplicationDto EnterpriseApp)>();
 
         foreach (var appReg in appRegistrations)
         {
