@@ -7,14 +7,14 @@ namespace Matriarch.Services;
 public class MatriarchWorker : IHostedService
 {
     private readonly ILogger<MatriarchWorker> _logger;
-    private readonly AzureDataService _azureDataService;
-    private readonly Neo4jService _neo4jService;
+    private readonly IAzureDataService _azureDataService;
+    private readonly INeo4jService _neo4jService;
     private readonly IHostApplicationLifetime _appLifetime;
 
     public MatriarchWorker(
         ILogger<MatriarchWorker> logger,
-        AzureDataService azureDataService,
-        Neo4jService neo4jService,
+        IAzureDataService azureDataService,
+        INeo4jService neo4jService,
         IHostApplicationLifetime appLifetime)
     {
         _logger = logger;

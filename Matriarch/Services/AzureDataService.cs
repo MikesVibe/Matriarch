@@ -375,7 +375,7 @@ public class AzureDataService : IAzureDataService
                     group.Members = [];
                 }
             }
-            
+
             _logger.LogInformation($"Applied cached members to {matchedCount}/{groups.Count} security groups. Total members: {cachedMemberCount}");
             return;
         }

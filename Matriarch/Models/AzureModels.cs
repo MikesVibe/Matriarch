@@ -61,5 +61,4 @@ public class SecurityGroupDto
     public string DisplayName { get; set; } = string.Empty;
     public string? Description { get; set; }
     public List<GroupMemberDto> Members { get; set; } = new();
-    public List<RoleAssignmentDto> RoleAssignments { get; set; } = new();
 }
