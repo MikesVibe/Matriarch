@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Matriarch.Models;
@@ -9,17 +10,20 @@ public class MatriarchWorker : IHostedService
     private readonly ILogger<MatriarchWorker> _logger;
     private readonly IAzureDataService _azureDataService;
     private readonly INeo4jService _neo4jService;
+    private readonly IServiceProvider _serviceProvider;
     private readonly IHostApplicationLifetime _appLifetime;
 
     public MatriarchWorker(
         ILogger<MatriarchWorker> logger,
         IAzureDataService azureDataService,
         INeo4jService neo4jService,
+        IServiceProvider serviceProvider,
         IHostApplicationLifetime appLifetime)
     {
         _logger = logger;
         _azureDataService = azureDataService;
         _neo4jService = neo4jService;
+        _serviceProvider = serviceProvider;
         _appLifetime = appLifetime;
     }
 
@@ -76,6 +80,15 @@ public class MatriarchWorker : IHostedService
             //await _neo4jService.StoreRoleAssignmentsAsync(roleAssignments, enterpriseApps, securityGroups);
             //await _neo4jService.StoreGroupMembershipsAsync(enterpriseApps);
             //await _neo4jService.StoreSecurityGroupMembersAsync(securityGroups);
+
+            // Store data in SQLite
+            _logger.LogInformation("=== Storing data in SQLite ===");
+            using (var scope = _serviceProvider.CreateScope())
+            {
+                var sqliteService = scope.ServiceProvider.GetRequiredService<ISqliteService>();
+                await sqliteService.InitializeDatabaseAsync();
+                await sqliteService.StoreDataAsync(appRegistrations, enterpriseApps, securityGroups, roleAssignments);
+            }
 
             _logger.LogInformation("=== Data integration completed successfully ===");
             _logger.LogInformation("Summary:");
