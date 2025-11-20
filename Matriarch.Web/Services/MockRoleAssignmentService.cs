@@ -1,4 +1,4 @@
-using Matriarch.Web.Models;
+using Matriarch.Shared.Models;
 
 namespace Matriarch.Web.Services;
 

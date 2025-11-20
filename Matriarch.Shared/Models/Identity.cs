@@ -1,4 +1,4 @@
-namespace Matriarch.Web.Models;
+namespace Matriarch.Shared.Models;
 
 public class Identity
 {
