@@ -5,7 +5,7 @@ A .NET solution for managing and visualizing Azure role assignments and security
 ## Projects
 
 ### Matriarch
-A .NET 8 console application that fetches data from Azure (Entra ID and Azure Resource Manager) and stores it in a Neo4j graph database.
+A .NET 10 console application that fetches data from Azure (Entra ID and Azure Resource Manager) and stores it in Neo4j graph database and SQLite database.
 
 ### Matriarch.Web
 A Blazor Server web application that provides an interactive UI for viewing role assignments and security group memberships for Azure identities.
@@ -27,8 +27,9 @@ A Blazor Server web application that provides an interactive UI for viewing role
 
 ## Prerequisites
 
-- .NET 8+ SDK (.NET 10 recommended for Matriarch.Web)
-- Neo4j database (local or cloud instance) - for Matriarch console app
+- .NET 10 SDK
+- Neo4j database (local or cloud instance) - optional, for Matriarch console app
+- SQLite - automatically created by Matriarch console app
 - Azure AD Service Principal with the following permissions (for Matriarch console app):
   - **Microsoft Graph API:**
     - `Application.Read.All`
@@ -53,6 +54,9 @@ Update `appsettings.json` with your credentials:
     "Uri": "bolt://localhost:7687",
     "Username": "neo4j",
     "Password": "your-neo4j-password"
+  },
+  "Sqlite": {
+    "DatabasePath": "matriarch.db"
   }
 }
 ```
@@ -65,6 +69,7 @@ Alternatively, you can use environment variables:
 - `Neo4j__Uri`
 - `Neo4j__Username`
 - `Neo4j__Password`
+- `Sqlite__DatabasePath`
 
 ## Building
 
@@ -149,6 +154,26 @@ docker-compose up
 ```
 
 Access Neo4j Browser at `http://localhost:7474` (username: `neo4j`, password: `password`)
+
+## SQLite Database
+
+The Matriarch console application now also stores data in a local SQLite database for efficient querying and analysis. The database includes:
+
+### Tables
+- **AppRegistrations**: Azure AD App Registrations
+- **EnterpriseApplications**: Service Principals
+- **SecurityGroups**: Entra Security Groups
+- **RoleAssignments**: Azure RBAC Role Assignments
+- **FederatedCredentials**: Federated Identity Credentials
+- **GroupMemberships**: Tracks group membership relationships (including circular references)
+
+### Circular Reference Handling
+The SQLite service includes built-in protection against infinite loops when traversing group membership hierarchies. For example, if:
+- Group A is a member of Group B
+- Group B is a member of Group C
+- Group C is a member of Group A (circular reference)
+
+The service will detect the circular reference and stop traversal, preventing infinite loops while still returning all accessible role assignments.
 
 ## Graph Schema
 
