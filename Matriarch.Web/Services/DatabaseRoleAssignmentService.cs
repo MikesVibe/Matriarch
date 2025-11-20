@@ -42,12 +42,13 @@ public class DatabaseRoleAssignmentService : IRoleAssignmentService
             .ToListAsync();
 
         // Build security groups with role assignments and handle circular dependencies
+        // Use a shared set to track all processed groups across the entire query
         var securityGroups = new List<SecurityGroup>();
-        var processedGroups = new HashSet<string>(); // To prevent infinite loops
+        var allProcessedGroups = new HashSet<string>(); // Global tracking to ensure each group appears once
 
         foreach (var groupId in directGroupIds)
         {
-            var group = await BuildSecurityGroupWithParentsAsync(groupId, processedGroups);
+            var group = await BuildSecurityGroupWithParentsAsync(groupId, allProcessedGroups, new HashSet<string>());
             if (group != null)
             {
                 securityGroups.Add(group);
@@ -62,16 +63,28 @@ public class DatabaseRoleAssignmentService : IRoleAssignmentService
         };
     }
 
-    private async Task<SecurityGroup?> BuildSecurityGroupWithParentsAsync(string groupId, HashSet<string> processedGroups)
+    private async Task<SecurityGroup?> BuildSecurityGroupWithParentsAsync(
+        string groupId, 
+        HashSet<string> allProcessedGroups,
+        HashSet<string> currentPath)
     {
-        // Prevent infinite loops - if we've already processed this group, return null
-        if (processedGroups.Contains(groupId))
+        // Prevent infinite loops - if this group is in the current path, we have a circular reference
+        if (currentPath.Contains(groupId))
         {
             return null;
         }
 
-        // Mark this group as processed
-        processedGroups.Add(groupId);
+        // If we've already fully processed this group globally, return null to avoid duplication
+        if (allProcessedGroups.Contains(groupId))
+        {
+            return null;
+        }
+
+        // Mark this group as globally processed
+        allProcessedGroups.Add(groupId);
+
+        // Add to current path for circular reference detection
+        currentPath.Add(groupId);
 
         // Get the group entity
         var groupEntity = await _dbContext.SecurityGroups
@@ -79,6 +92,7 @@ public class DatabaseRoleAssignmentService : IRoleAssignmentService
 
         if (groupEntity == null)
         {
+            currentPath.Remove(groupId);
             return null;
         }
 
@@ -100,18 +114,21 @@ public class DatabaseRoleAssignmentService : IRoleAssignmentService
             .Select(gm => gm.GroupId)
             .ToListAsync();
 
-        // Recursively build parent groups, but skip any that are already processed
+        // Recursively build parent groups
         var parentGroups = new List<SecurityGroup>();
         foreach (var parentGroupId in parentGroupIds)
         {
-            // Create a copy of processedGroups for each parent to handle diamond dependencies correctly
-            var parentProcessedGroups = new HashSet<string>(processedGroups);
-            var parentGroup = await BuildSecurityGroupWithParentsAsync(parentGroupId, parentProcessedGroups);
+            // Use the same allProcessedGroups but a new path copy for each parent branch
+            var newPath = new HashSet<string>(currentPath);
+            var parentGroup = await BuildSecurityGroupWithParentsAsync(parentGroupId, allProcessedGroups, newPath);
             if (parentGroup != null)
             {
                 parentGroups.Add(parentGroup);
             }
         }
+
+        // Remove from current path before returning
+        currentPath.Remove(groupId);
 
         return new SecurityGroup
         {
