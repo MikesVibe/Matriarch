@@ -1,6 +1,14 @@
 # Matriarch
 
-A .NET 8 application that fetches data from Azure (Entra ID and Azure Resource Manager) and stores it in a Neo4j graph database.
+A .NET solution for managing and visualizing Azure role assignments and security relationships.
+
+## Projects
+
+### Matriarch
+A .NET 8 console application that fetches data from Azure (Entra ID and Azure Resource Manager) and stores it in a Neo4j graph database.
+
+### Matriarch.Web
+A Blazor Server web application that provides an interactive UI for viewing role assignments and security group memberships for Azure identities.
 
 ## Features
 
@@ -19,9 +27,9 @@ A .NET 8 application that fetches data from Azure (Entra ID and Azure Resource M
 
 ## Prerequisites
 
-- .NET 8 SDK
-- Neo4j database (local or cloud instance)
-- Azure AD Service Principal with the following permissions:
+- .NET 8+ SDK (.NET 10 recommended for Matriarch.Web)
+- Neo4j database (local or cloud instance) - for Matriarch console app
+- Azure AD Service Principal with the following permissions (for Matriarch console app):
   - **Microsoft Graph API:**
     - `Application.Read.All`
     - `Directory.Read.All`
@@ -60,21 +68,51 @@ Alternatively, you can use environment variables:
 
 ## Building
 
+Build the entire solution:
+```bash
+dotnet build Matriarch.sln
+```
+
+Or build individual projects:
 ```bash
 cd Matriarch
 dotnet build
 ```
 
+```bash
+cd Matriarch.Web
+dotnet build
+```
+
 ## Running
 
-### Using .NET CLI
+### Matriarch Console Application
 
+Using .NET CLI:
 ```bash
 cd Matriarch
 dotnet run
 ```
 
-### Using Docker
+### Matriarch.Web (Blazor Application)
+
+Using .NET CLI:
+```bash
+cd Matriarch.Web
+dotnet run
+```
+
+Then open your browser and navigate to `http://localhost:5196` (or the URL shown in the console).
+
+**Features:**
+- View role assignments for Azure identities
+- Input fields for Object ID, Application ID, Email, and Name
+- Display direct role assignments
+- Show security group memberships
+- Hierarchically display parent security group role assignments
+- Currently uses mock data for demonstration
+
+### Matriarch Console - Using Docker
 
 Build the Docker image:
 ```bash
@@ -95,7 +133,7 @@ docker run --rm \
   matriarch:latest
 ```
 
-### Using Docker Compose
+### Matriarch Console - Using Docker Compose
 
 Create a `.env` file in the root directory with your Azure credentials:
 ```env
