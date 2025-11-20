@@ -21,7 +21,7 @@ public class AzureDataService : IAzureDataService
     private readonly GraphServiceClient _graphClient;
     private readonly TokenCredential _credential;
     private readonly HttpClient _httpClient;
-    private readonly CachingService _cachingService;
+    private readonly ICachingService _cachingService;
     private readonly List<AzureRoleAssignment> _roleAssignments = [];
     private const string ResourceGraphApiEndpoint = "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01";
     private const string _query = @"
@@ -38,7 +38,7 @@ public class AzureDataService : IAzureDataService
                 ) on $left.roleDefinitionId == $right.id
                 | project id, principalId, principalType, roleDefinitionId, roleName, scope";
 
-    public AzureDataService(AppSettings settings, ILogger<AzureDataService> logger, CachingService cachingService)
+    public AzureDataService(AppSettings settings, ILogger<AzureDataService> logger, ICachingService cachingService)
     {
         _logger = logger;
         _cachingService = cachingService;

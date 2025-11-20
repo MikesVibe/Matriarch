@@ -46,12 +46,13 @@ class Program
                 services.AddSingleton(appSettings);
 
                 // Register services
-                services.AddSingleton<CachingService>();
-                services.AddSingleton<AzureDataService>();
-                services.AddSingleton<Neo4jService>();
+                services.AddSingleton<ICachingService, CachingService>();
+                services.AddSingleton<IAzureDataService, AzureDataService>();
+                services.AddSingleton<INeo4jService, Neo4jService>();
 
                 // Register the worker
                 services.AddHostedService<MatriarchWorker>();
+                //services.AddHostedService<TestWorker>();
             })
             .ConfigureLogging((context, logging) =>
             {
