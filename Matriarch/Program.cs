@@ -1,8 +1,10 @@
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Matriarch.Configuration;
+using Matriarch.Data;
 using Matriarch.Services;
 
 namespace Matriarch;
@@ -45,10 +47,15 @@ class Program
                 // Register AppSettings as singleton
                 services.AddSingleton(appSettings);
 
+                // Register SQLite DbContext
+                services.AddDbContext<MatriarchDbContext>(options =>
+                    options.UseSqlite($"Data Source={appSettings.Sqlite.DatabasePath}"));
+
                 // Register services
                 services.AddSingleton<ICachingService, CachingService>();
                 services.AddSingleton<IAzureDataService, AzureDataService>();
                 services.AddSingleton<INeo4jService, Neo4jService>();
+                services.AddScoped<ISqliteService, SqliteService>();
 
                 // Register the worker
                 services.AddHostedService<MatriarchWorker>();
