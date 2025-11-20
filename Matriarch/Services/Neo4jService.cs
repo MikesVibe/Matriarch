@@ -5,7 +5,7 @@ using Matriarch.Models;
 
 namespace Matriarch.Services;
 
-public class Neo4jService : IAsyncDisposable
+public class Neo4jService : INeo4jService, IAsyncDisposable
 {
     private readonly ILogger<Neo4jService> _logger;
     private readonly IDriver _driver;

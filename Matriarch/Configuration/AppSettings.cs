@@ -24,6 +24,6 @@ public class Neo4jSettings
 
 public class CacheSettings
 {
-    public bool UseCache { get; set; } = false;
+    public bool UseCache { get; set; } = true;
     public string CacheDirectory { get; set; } = "cache";
 }

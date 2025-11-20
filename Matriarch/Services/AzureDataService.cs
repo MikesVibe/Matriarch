@@ -2,7 +2,9 @@ using Azure.Core;
 using Azure.Identity;
 using Microsoft.Extensions.Logging;
 using Microsoft.Graph;
-using Microsoft.Graph.Models;
+using Microsoft.Graph.Beta;
+using Microsoft.Graph.Beta.Models;
+using Microsoft.Kiota.Abstractions;
 using Matriarch.Configuration;
 using Matriarch.Models;
 using System.Text.Json;
@@ -13,7 +15,7 @@ using AzureRoleAssignment = Matriarch.Models.RoleAssignmentDto;
 
 namespace Matriarch.Services;
 
-public class AzureDataService
+public class AzureDataService : IAzureDataService
 {
     private readonly ILogger<AzureDataService> _logger;
     private readonly GraphServiceClient _graphClient;

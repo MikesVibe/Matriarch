@@ -5,7 +5,7 @@ using System.Text.Json.Serialization;
 
 namespace Matriarch.Services;
 
-public class CachingService
+public class CachingService : ICachingService
 {
     private readonly ILogger<CachingService> _logger;
     private readonly CacheSettings _cacheSettings;
@@ -92,7 +92,7 @@ public class CachingService
     /// <summary>
     /// Clears a specific cache entry
     /// </summary>
-    public void ClearCache(string cacheKey)
+    public Task ClearCacheAsync(string cacheKey)
     {
         var cacheFilePath = GetCacheFilePath(cacheKey);
 
@@ -108,16 +108,18 @@ public class CachingService
                 _logger.LogError(ex, $"Error deleting cache file: {cacheFilePath}");
             }
         }
+        
+        return Task.CompletedTask;
     }
 
     /// <summary>
     /// Clears all cache files
     /// </summary>
-    public void ClearAllCache()
+    public Task ClearAllCacheAsync()
     {
         if (!Directory.Exists(_cacheSettings.CacheDirectory))
         {
-            return;
+            return Task.CompletedTask;
         }
 
         try
@@ -133,6 +135,8 @@ public class CachingService
         {
             _logger.LogError(ex, "Error clearing cache directory");
         }
+        
+        return Task.CompletedTask;
     }
 
     /// <summary>

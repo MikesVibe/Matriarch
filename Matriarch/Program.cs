@@ -1,4 +1,6 @@
-﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Matriarch.Configuration;
 using Matriarch.Services;
@@ -7,111 +9,63 @@ namespace Matriarch;
 
 class Program
 {
-    static async Task Main(string[] args)
+    static async Task<int> Main(string[] args)
     {
-        // Build configuration
-        var configuration = new ConfigurationBuilder()
-            .SetBasePath(Directory.GetCurrentDirectory())
-            .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
-            .AddEnvironmentVariables()
-            .Build();
-
-        // Bind settings
-        var settings = new AppSettings();
-        configuration.Bind(settings);
-
-        // Setup logging
-        using var loggerFactory = LoggerFactory.Create(builder =>
+        try
         {
-            builder
-                .AddConfiguration(configuration.GetSection("Logging"))
-                .AddSimpleConsole(options =>
+            var host = CreateHostBuilder(args).Build();
+            await host.RunAsync();
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Fatal error: {ex.Message}");
+            return 1;
+        }
+    }
+
+    static IHostBuilder CreateHostBuilder(string[] args) =>
+        Host.CreateDefaultBuilder(args)
+            .ConfigureAppConfiguration((context, config) =>
+            {
+                config
+                    .SetBasePath(Directory.GetCurrentDirectory())
+                    .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+                    .AddEnvironmentVariables();
+            })
+            .ConfigureServices((context, services) =>
+            {
+                // Bind and register configuration
+                var appSettings = new AppSettings();
+                context.Configuration.Bind(appSettings);
+                
+                // Validate configuration
+                ValidateConfiguration(appSettings);
+                
+                // Register AppSettings as singleton
+                services.AddSingleton(appSettings);
+
+                // Register services
+                services.AddSingleton<CachingService>();
+                services.AddSingleton<AzureDataService>();
+                services.AddSingleton<Neo4jService>();
+
+                // Register the worker
+                services.AddHostedService<MatriarchWorker>();
+            })
+            .ConfigureLogging((context, logging) =>
+            {
+                logging.ClearProviders();
+                logging.AddConfiguration(context.Configuration.GetSection("Logging"));
+                logging.AddSimpleConsole(options =>
                 {
                     options.SingleLine = true;
                     options.IncludeScopes = false;
                     options.TimestampFormat = "HH:mm:ss ";
                 });
-        });
+            });
 
-        var logger = loggerFactory.CreateLogger<Program>();
-
-        try
-        {
-            logger.LogInformation("Starting Matriarch - Azure to Neo4j Data Integration");
-
-            // Validate configuration
-            ValidateConfiguration(settings, logger);
-
-            // Initialize services
-            var cachingService = new CachingService(settings, loggerFactory.CreateLogger<CachingService>());
-            var azureDataService = new AzureDataService(settings, loggerFactory.CreateLogger<AzureDataService>(), cachingService);
-            var neo4jService = new Neo4jService(settings, loggerFactory.CreateLogger<Neo4jService>());
-
-            //Initialize Neo4j database schema
-            await neo4jService.InitializeDatabaseAsync();
-
-            // Fetch data from Azure
-            logger.LogInformation("=== Fetching data from Azure ===");
-
-            var roleAssignments = await azureDataService.FetchRoleAssignmentsAsync();
-            logger.LogInformation("Found {count} of Role Assignment/s", roleAssignments.Count);
-
-            var appRegistrations = await azureDataService.FetchAppRegistrationsAsync();
-            logger.LogInformation("Found {count} of App Registration/s", appRegistrations.Count);
-
-            logger.LogInformation("Starting to fetch enterprise applications...");
-            var enterpriseApps = await azureDataService.FetchEnterpriseApplicationsAsync();
-            logger.LogInformation("Successfully fetched {Count} enterprise applications", enterpriseApps.Count);
-
-            var securityGroups = await azureDataService.FetchSecurityGroupsAsync();
-            logger.LogInformation("Found {count} of Security Group/s", securityGroups.Count);
-
-            // Fetch members for security groups
-            await azureDataService.FetchMembersForSecurityGroupsAsync(securityGroups);
-            logger.LogInformation("Fetched members for {count} security groups", securityGroups.Count);
-
-            // Link service principal IDs to app registrations
-            var linkedAppsDict = LinkAppRegistrationsToEnterpriseApps(appRegistrations, enterpriseApps, logger);
-
-            // Fetch group memberships only for enterprise apps linked to app registrations
-            if (linkedAppsDict.Count > 0)
-            {
-                var linkedEnterpriseApps = linkedAppsDict.Values.Select(pair => pair.EnterpriseApp).ToList();
-                logger.LogInformation("Fetching group memberships for {Count} linked enterprise applications...", linkedEnterpriseApps.Count);
-                await azureDataService.FetchGroupMembershipsForLinkedAppsAsync(linkedEnterpriseApps);
-            }
-            else
-            {
-                logger.LogWarning("No enterprise applications are linked to app registrations");
-            }
-
-            // Store data in Neo4j
-            logger.LogInformation("=== Storing data in Neo4j ===");
-
-            //await neo4jService.StoreAppRegistrationsAsync(appRegistrations);
-            //await neo4jService.StoreSecurityGroupsAsync(securityGroups);
-            //await neo4jService.StoreEnterpriseApplicationsAsync(enterpriseApps);
-            //await neo4jService.StoreRoleAssignmentsAsync(roleAssignments, enterpriseApps, securityGroups);
-            //await neo4jService.StoreGroupMembershipsAsync(enterpriseApps);
-            //await neo4jService.StoreSecurityGroupMembersAsync(securityGroups);
-
-            logger.LogInformation("=== Data integration completed successfully ===");
-            logger.LogInformation($"Summary:");
-            logger.LogInformation($"  - App Registrations: {appRegistrations.Count}");
-            logger.LogInformation($"  - Enterprise Applications: {enterpriseApps.Count}");
-            logger.LogInformation($"  - Security Groups: {securityGroups.Count}");
-            logger.LogInformation($"  - Role Assignments: {roleAssignments.Count}");
-
-            await neo4jService.DisposeAsync();
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "An error occurred during execution");
-            Environment.Exit(1);
-        }
-    }
-
-    private static void ValidateConfiguration(AppSettings settings, ILogger logger)
+    private static void ValidateConfiguration(AppSettings settings)
     {
         var errors = new List<string>();
 
@@ -130,37 +84,13 @@ class Program
 
         if (errors.Count > 0)
         {
-            logger.LogError("Configuration validation failed:");
+            Console.WriteLine("Configuration validation failed:");
             foreach (var error in errors)
             {
-                logger.LogError($"  - {error}");
+                Console.WriteLine($"  - {error}");
             }
-            logger.LogInformation("Please update appsettings.json or set environment variables.");
+            Console.WriteLine("Please update appsettings.json or set environment variables.");
             throw new InvalidOperationException("Configuration validation failed");
         }
-    }
-
-    private static Dictionary<string, (Models.AppRegistrationDto AppRegistration, Models.EnterpriseApplicationDto EnterpriseApp)> LinkAppRegistrationsToEnterpriseApps(
-        List<Models.AppRegistrationDto> appRegistrations,
-        List<Models.EnterpriseApplicationDto> enterpriseApps,
-        ILogger logger)
-    {
-        logger.LogInformation("Linking app registrations to enterprise applications...");
-
-        var enterpriseAppsByAppId = enterpriseApps.ToDictionary(e => e.AppId, e => e);
-        var linkedApps = new Dictionary<string, (Models.AppRegistrationDto AppRegistration, Models.EnterpriseApplicationDto EnterpriseApp)>();
-
-        foreach (var appReg in appRegistrations)
-        {
-            if (enterpriseAppsByAppId.TryGetValue(appReg.AppId, out var enterpriseApp))
-            {
-                appReg.ServicePrincipalId = enterpriseApp.Id;
-                linkedApps[appReg.AppId] = (appReg, enterpriseApp);
-            }
-        }
-
-        logger.LogInformation($"Linked {linkedApps.Count} app registrations to enterprise applications");
-
-        return linkedApps;
     }
 }
