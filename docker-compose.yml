@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  neo4j:
+    image: neo4j:5.14
+    ports:
+      - "7474:7474"  # HTTP
+      - "7687:7687"  # Bolt
+    environment:
+      - NEO4J_AUTH=neo4j/password
+      - NEO4J_PLUGINS=["apoc"]
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+
+  matriarch:
+    build:
+      context: ./Matriarch
+      dockerfile: Dockerfile
+    depends_on:
+      - neo4j
+    environment:
+      - Azure__TenantId=${AZURE_TENANT_ID}
+      - Azure__SubscriptionId=${AZURE_SUBSCRIPTION_ID}
+      - Azure__ClientId=${AZURE_CLIENT_ID}
+      - Azure__ClientSecret=${AZURE_CLIENT_SECRET}
+      - Neo4j__Uri=bolt://neo4j:7687
+      - Neo4j__Username=neo4j
+      - Neo4j__Password=password
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
