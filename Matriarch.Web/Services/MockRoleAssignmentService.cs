@@ -4,7 +4,7 @@ namespace Matriarch.Web.Services;
 
 public interface IRoleAssignmentService
 {
-    Task<IdentityRoleAssignmentResult> GetRoleAssignmentsAsync(string objectId, string applicationId, string email, string name);
+    Task<IdentityRoleAssignmentResult> GetRoleAssignmentsAsync(string identityInput);
 }
 
 public class MockRoleAssignmentService : IRoleAssignmentService
@@ -88,17 +88,17 @@ public class MockRoleAssignmentService : IRoleAssignmentService
         };
     }
 
-    public Task<IdentityRoleAssignmentResult> GetRoleAssignmentsAsync(string objectId, string applicationId, string email, string name)
+    public Task<IdentityRoleAssignmentResult> GetRoleAssignmentsAsync(string identityInput)
     {
         // For demo purposes, return mock data for any input
         // In a real implementation, this would query Azure or Neo4j
         
         var identity = new Identity
         {
-            ObjectId = objectId,
-            ApplicationId = applicationId,
-            Email = email,
-            Name = name
+            ObjectId = "12345678-1234-1234-1234-123456789abc",
+            ApplicationId = "87654321-4321-4321-4321-cba987654321",
+            Email = "user@example.com",
+            Name = identityInput
         };
 
         // Simulate that this user is member of the first two security groups

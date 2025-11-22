@@ -13,19 +13,44 @@ public class DatabaseRoleAssignmentService : IRoleAssignmentService
         _dbContext = dbContext;
     }
 
-    public async Task<IdentityRoleAssignmentResult> GetRoleAssignmentsAsync(string objectId, string applicationId, string email, string name)
+    public async Task<IdentityRoleAssignmentResult> GetRoleAssignmentsAsync(string identityInput)
     {
+        // Try to find the identity in the database
+        // Search by ObjectId (GUID), Email, or Name
+        string? objectId = null;
+        string? applicationId = null;
+        string? email = null;
+        string? name = null;
+
+        // Check if input is a GUID
+        if (Guid.TryParse(identityInput, out _))
+        {
+            objectId = identityInput;
+            // Try to find additional info in database if available
+            // This is a simplified version - in reality you'd query your identity table
+        }
+        else if (identityInput.Contains("@"))
+        {
+            email = identityInput;
+            // Try to find objectId from email in database
+        }
+        else
+        {
+            name = identityInput;
+            // Try to find objectId from name in database
+        }
+
         var identity = new Identity
         {
-            ObjectId = objectId,
-            ApplicationId = applicationId,
-            Email = email,
-            Name = name
+            ObjectId = objectId ?? "Unknown",
+            ApplicationId = applicationId ?? "Unknown",
+            Email = email ?? "Unknown",
+            Name = name ?? identityInput
         };
 
-        // Get direct role assignments for this principal (by objectId or applicationId)
+        // Get direct role assignments for this principal
         var directRoleAssignments = await _dbContext.RoleAssignments
-            .Where(ra => ra.PrincipalId == objectId || ra.PrincipalId == applicationId)
+            .Where(ra => ra.PrincipalId == (objectId ?? identityInput))
             .Select(ra => new RoleAssignment
             {
                 Id = ra.Id,
@@ -37,7 +62,7 @@ public class DatabaseRoleAssignmentService : IRoleAssignmentService
 
         // Get security groups this identity is a member of (directly)
         var directGroupIds = await _dbContext.GroupMemberships
-            .Where(gm => gm.MemberId == objectId || gm.MemberId == applicationId)
+            .Where(gm => gm.MemberId == (objectId ?? identityInput))
             .Select(gm => gm.GroupId)
             .ToListAsync();
 

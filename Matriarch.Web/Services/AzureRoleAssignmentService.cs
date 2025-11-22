@@ -54,26 +54,36 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
         _httpClient = new HttpClient();
     }
 
-    public async Task<SharedIdentityResult> GetRoleAssignmentsAsync(string objectId, string applicationId, string email, string name)
+    public async Task<SharedIdentityResult> GetRoleAssignmentsAsync(string identityInput)
     {
-        _logger.LogInformation("Fetching role assignments from Azure for identity: {ObjectId}", objectId);
-
-        var identity = new SharedIdentity
-        {
-            ObjectId = objectId,
-            ApplicationId = applicationId,
-            Email = email,
-            Name = name
-        };
+        _logger.LogInformation("Fetching role assignments from Azure for identity: {IdentityInput}", identityInput);
 
         try
         {
-            // Fetch all role assignments from Azure Resource Graph
-            var allRoleAssignments = await FetchRoleAssignmentsFromAzureAsync();
+            // Step 1: Resolve and validate the identity via Entra ID
+            var resolvedIdentity = await ResolveIdentityAsync(identityInput);
+            if (resolvedIdentity == null)
+            {
+                throw new InvalidOperationException($"Could not resolve identity: {identityInput}");
+            }
+
+            _logger.LogInformation("Resolved identity: {Name} ({ObjectId})", resolvedIdentity.Name, resolvedIdentity.ObjectId);
+
+            // Step 2: Fetch role assignments specifically for this principal and their groups
+            var principalIds = new List<string> { resolvedIdentity.ObjectId };
             
-            // Filter direct role assignments for this principal
-            var directRoleAssignments = allRoleAssignments
-                .Where(ra => ra.PrincipalId == objectId || ra.PrincipalId == applicationId)
+            // Get group memberships first
+            var groupIds = await GetGroupMembershipsAsync(resolvedIdentity.ObjectId);
+            principalIds.AddRange(groupIds);
+
+            _logger.LogInformation("Fetching role assignments for principal and {GroupCount} groups", groupIds.Count);
+
+            // Step 3: Fetch role assignments only for these specific principals
+            var roleAssignments = await FetchRoleAssignmentsForPrincipalsAsync(principalIds);
+            
+            // Filter direct role assignments (only for the user/service principal)
+            var directRoleAssignments = roleAssignments
+                .Where(ra => ra.PrincipalId == resolvedIdentity.ObjectId)
                 .Select(ra => new SharedRoleAssignment
                 {
                     Id = ra.Id,
@@ -83,12 +93,12 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                 })
                 .ToList();
 
-            // Fetch security groups this identity is a member of
-            var securityGroups = await FetchSecurityGroupMembershipsAsync(objectId, applicationId, allRoleAssignments);
+            // Step 4: Build security group hierarchy with role assignments
+            var securityGroups = await BuildSecurityGroupsAsync(groupIds, roleAssignments);
 
             return new SharedIdentityResult
             {
-                Identity = identity,
+                Identity = resolvedIdentity,
                 DirectRoleAssignments = directRoleAssignments,
                 SecurityGroups = securityGroups
             };
@@ -100,41 +110,148 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
         }
     }
 
-    private async Task<List<AzureRoleAssignmentDto>> FetchRoleAssignmentsFromAzureAsync()
+    private async Task<SharedIdentity?> ResolveIdentityAsync(string identityInput)
     {
-        _logger.LogInformation("Fetching role assignments from Azure Resource Graph API...");
-        
-        var roleAssignments = new List<AzureRoleAssignmentDto>();
-        var token = await GetAuthorizationTokenAsync();
-        string? skipToken = null;
+        _logger.LogInformation("Resolving identity from input: {Input}", identityInput);
 
-        do
+        // Auto-detect input type
+        if (Guid.TryParse(identityInput, out _))
         {
-            var responseDocument = await FetchRoleAssignmentsPageAsync(token, skipToken);
-            var pageOfRoleAssignments = ParseRoleAssignmentsResponse(responseDocument);
-            roleAssignments.AddRange(pageOfRoleAssignments);
+            // It's a GUID - could be ObjectId or ApplicationId
+            // Try as User first
+            try
+            {
+                var user = await _graphClient.Users[identityInput].GetAsync();
+                if (user != null)
+                {
+                    return new SharedIdentity
+                    {
+                        ObjectId = user.Id ?? identityInput,
+                        ApplicationId = "",
+                        Email = user.Mail ?? user.UserPrincipalName ?? "",
+                        Name = user.DisplayName ?? ""
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Not found as user, trying as service principal");
+            }
 
-            skipToken = GetContinuationToken(responseDocument);
-        } while (!string.IsNullOrEmpty(skipToken));
+            // Try as Service Principal
+            try
+            {
+                var sp = await _graphClient.ServicePrincipals[identityInput].GetAsync();
+                if (sp != null)
+                {
+                    return new SharedIdentity
+                    {
+                        ObjectId = sp.Id ?? identityInput,
+                        ApplicationId = sp.AppId ?? "",
+                        Email = "",
+                        Name = sp.DisplayName ?? ""
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Identity not found by ObjectId");
+            }
+        }
+        else if (identityInput.Contains("@"))
+        {
+            // It's an email - look up user by email/UPN
+            try
+            {
+                var users = await _graphClient.Users.GetAsync(config =>
+                {
+                    config.QueryParameters.Filter = $"mail eq '{identityInput}' or userPrincipalName eq '{identityInput}'";
+                    config.QueryParameters.Top = 1;
+                });
 
-        _logger.LogInformation("Fetched {Count} total role assignments from Azure", roleAssignments.Count);
-        return roleAssignments;
+                var user = users?.Value?.FirstOrDefault();
+                if (user != null)
+                {
+                    return new SharedIdentity
+                    {
+                        ObjectId = user.Id ?? "",
+                        ApplicationId = "",
+                        Email = user.Mail ?? user.UserPrincipalName ?? identityInput,
+                        Name = user.DisplayName ?? ""
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "User not found by email");
+            }
+        }
+        else
+        {
+            // It's a display name - search by display name
+            try
+            {
+                var users = await _graphClient.Users.GetAsync(config =>
+                {
+                    config.QueryParameters.Filter = $"startswith(displayName, '{identityInput}')";
+                    config.QueryParameters.Top = 1;
+                });
+
+                var user = users?.Value?.FirstOrDefault();
+                if (user != null)
+                {
+                    return new SharedIdentity
+                    {
+                        ObjectId = user.Id ?? "",
+                        ApplicationId = "",
+                        Email = user.Mail ?? user.UserPrincipalName ?? "",
+                        Name = user.DisplayName ?? identityInput
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Not found as user by name, trying service principal");
+            }
+
+            // Try as Service Principal by display name
+            try
+            {
+                var sps = await _graphClient.ServicePrincipals.GetAsync(config =>
+                {
+                    config.QueryParameters.Filter = $"startswith(displayName, '{identityInput}')";
+                    config.QueryParameters.Top = 1;
+                });
+
+                var sp = sps?.Value?.FirstOrDefault();
+                if (sp != null)
+                {
+                    return new SharedIdentity
+                    {
+                        ObjectId = sp.Id ?? "",
+                        ApplicationId = sp.AppId ?? "",
+                        Email = "",
+                        Name = sp.DisplayName ?? identityInput
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Service principal not found by name");
+            }
+        }
+
+        return null;
     }
 
-    private async Task<List<SharedSecurityGroup>> FetchSecurityGroupMembershipsAsync(
-        string objectId, 
-        string applicationId,
-        List<AzureRoleAssignmentDto> allRoleAssignments)
+    private async Task<List<string>> GetGroupMembershipsAsync(string principalId)
     {
-        _logger.LogInformation("Fetching security group memberships from Microsoft Graph...");
-
-        var securityGroups = new List<SharedSecurityGroup>();
-        var processedGroups = new HashSet<string>();
+        var groupIds = new List<string>();
 
         try
         {
-            // Try to get user's group memberships
-            var memberOfPage = await _graphClient.Users[objectId].MemberOf.GetAsync(config =>
+            // Try as user first
+            var memberOfPage = await _graphClient.Users[principalId].MemberOf.GetAsync(config =>
             {
                 config.QueryParameters.Top = 999;
             });
@@ -143,28 +260,21 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             {
                 foreach (var directoryObject in memberOfPage.Value)
                 {
-                    if (directoryObject is Group group && group.SecurityEnabled == true)
+                    if (directoryObject is Group group && group.SecurityEnabled == true && !string.IsNullOrEmpty(group.Id))
                     {
-                        if (!string.IsNullOrEmpty(group.Id))
-                        {
-                            var securityGroup = await BuildSecurityGroupAsync(group.Id, allRoleAssignments, processedGroups);
-                            if (securityGroup != null)
-                            {
-                                securityGroups.Add(securityGroup);
-                            }
-                        }
+                        groupIds.Add(group.Id);
                     }
                 }
             }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Error fetching group memberships for user {ObjectId}, trying service principal...", objectId);
+            _logger.LogDebug(ex, "Not a user, trying as service principal");
             
-            // Try as service principal if user lookup fails
             try
             {
-                var spMemberOfPage = await _graphClient.ServicePrincipals[objectId].MemberOf.GetAsync(config =>
+                // Try as service principal
+                var spMemberOfPage = await _graphClient.ServicePrincipals[principalId].MemberOf.GetAsync(config =>
                 {
                     config.QueryParameters.Top = 999;
                 });
@@ -173,28 +283,87 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                 {
                     foreach (var directoryObject in spMemberOfPage.Value)
                     {
-                        if (directoryObject is Group group && group.SecurityEnabled == true)
+                        if (directoryObject is Group group && group.SecurityEnabled == true && !string.IsNullOrEmpty(group.Id))
                         {
-                            if (!string.IsNullOrEmpty(group.Id))
-                            {
-                                var securityGroup = await BuildSecurityGroupAsync(group.Id, allRoleAssignments, processedGroups);
-                                if (securityGroup != null)
-                                {
-                                    securityGroups.Add(securityGroup);
-                                }
-                            }
+                            groupIds.Add(group.Id);
                         }
                     }
                 }
             }
             catch (Exception spEx)
             {
-                _logger.LogWarning(spEx, "Error fetching group memberships for service principal {ObjectId}", objectId);
+                _logger.LogWarning(spEx, "Could not fetch group memberships");
+            }
+        }
+
+        return groupIds;
+    }
+
+    private async Task<List<AzureRoleAssignmentDto>> FetchRoleAssignmentsForPrincipalsAsync(List<string> principalIds)
+    {
+        if (!principalIds.Any())
+        {
+            return new List<AzureRoleAssignmentDto>();
+        }
+
+        _logger.LogInformation("Fetching role assignments for {Count} principals from Azure Resource Graph API...", principalIds.Count);
+        
+        var roleAssignments = new List<AzureRoleAssignmentDto>();
+        var token = await GetAuthorizationTokenAsync();
+
+        // Build filter for specific principals
+        var principalFilter = string.Join(" or ", principalIds.Select(id => $"principalId == '{id}'"));
+        
+        var query = $@"
+            authorizationresources
+            | where type =~ 'microsoft.authorization/roleassignments'
+            | extend principalType = tostring(properties['principalType'])
+            | extend principalId = tostring(properties['principalId'])
+            | extend roleDefinitionId = tolower(tostring(properties['roleDefinitionId']))
+            | extend scope = tostring(properties['scope'])
+            | where {principalFilter}
+            | join kind=inner ( 
+                authorizationresources
+                | where type =~ 'microsoft.authorization/roledefinitions'
+                | extend id = tolower(id), roleName = tostring(properties['roleName'])
+            ) on $left.roleDefinitionId == $right.id
+            | project id, principalId, principalType, roleDefinitionId, roleName, scope";
+
+        string? skipToken = null;
+
+        do
+        {
+            var responseDocument = await FetchRoleAssignmentsPageAsync(token, skipToken, query);
+            var pageOfRoleAssignments = ParseRoleAssignmentsResponse(responseDocument);
+            roleAssignments.AddRange(pageOfRoleAssignments);
+
+            skipToken = GetContinuationToken(responseDocument);
+        } while (!string.IsNullOrEmpty(skipToken));
+
+        _logger.LogInformation("Fetched {Count} role assignments for specified principals", roleAssignments.Count);
+        return roleAssignments;
+    }
+
+    private async Task<List<SharedSecurityGroup>> BuildSecurityGroupsAsync(
+        List<string> groupIds, 
+        List<AzureRoleAssignmentDto> roleAssignments)
+    {
+        var securityGroups = new List<SharedSecurityGroup>();
+        var processedGroups = new HashSet<string>();
+
+        foreach (var groupId in groupIds)
+        {
+            var group = await BuildSecurityGroupAsync(groupId, roleAssignments, processedGroups);
+            if (group != null)
+            {
+                securityGroups.Add(group);
             }
         }
 
         return securityGroups;
     }
+
+
 
     private async Task<SharedSecurityGroup?> BuildSecurityGroupAsync(
         string groupId,
@@ -279,11 +448,11 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
         return token;
     }
 
-    private async Task<JsonDocument> FetchRoleAssignmentsPageAsync(AccessToken token, string? skipToken)
+    private async Task<JsonDocument> FetchRoleAssignmentsPageAsync(AccessToken token, string? skipToken, string? customQuery = null)
     {
         var requestBody = new Dictionary<string, object>
         {
-            ["query"] = _roleAssignmentsQuery,
+            ["query"] = customQuery ?? _roleAssignmentsQuery,
             ["options"] = new Dictionary<string, object>
             {
                 ["resultFormat"] = "objectArray",
