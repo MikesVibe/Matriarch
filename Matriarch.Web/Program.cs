@@ -24,9 +24,6 @@ builder.Services.AddDbContext<MatriarchDbContext>(options =>
 builder.Services.AddScoped<DatabaseRoleAssignmentService>();
 builder.Services.AddScoped<AzureRoleAssignmentService>();
 
-// Keep DatabaseRoleAssignmentService as default for backward compatibility
-builder.Services.AddScoped<IRoleAssignmentService, DatabaseRoleAssignmentService>();
-
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.

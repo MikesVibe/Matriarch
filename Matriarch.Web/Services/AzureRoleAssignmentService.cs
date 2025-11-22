@@ -246,7 +246,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                     {
                         if (!string.IsNullOrEmpty(parentGroup.Id))
                         {
-                            var securityParentGroup = await BuildSecurityGroupAsync(parentGroup.Id, allRoleAssignments, new HashSet<string>(processedGroups));
+                            var securityParentGroup = await BuildSecurityGroupAsync(parentGroup.Id, allRoleAssignments, processedGroups);
                             if (securityParentGroup != null)
                             {
                                 parentGroups.Add(securityParentGroup);
