@@ -9,6 +9,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Matriarch.Shared\Matriarch.Shared.csproj" />
+    <ProjectReference Include="..\Matriarch\Matriarch.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.0" />
   </ItemGroup>
 
 </Project>

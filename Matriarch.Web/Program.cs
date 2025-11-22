@@ -1,5 +1,7 @@
+using Matriarch.Data;
 using Matriarch.Web.Components;
 using Matriarch.Web.Services;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -7,8 +9,13 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
+// Register SQLite DbContext
+var connectionString = builder.Configuration.GetConnectionString("MatriarchDb");
+builder.Services.AddDbContext<MatriarchDbContext>(options =>
+    options.UseSqlite(connectionString));
+
 // Register custom services
-builder.Services.AddScoped<IRoleAssignmentService, MockRoleAssignmentService>();
+builder.Services.AddScoped<IRoleAssignmentService, DatabaseRoleAssignmentService>();
 
 var app = builder.Build();
 
