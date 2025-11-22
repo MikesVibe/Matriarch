@@ -22,6 +22,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
     private readonly TokenCredential _credential;
     private readonly HttpClient _httpClient;
     private const string ResourceGraphApiEndpoint = "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01";
+    private const int MaxGraphPageSize = 999;
     
     private const string _roleAssignmentsQuery = @"
         authorizationresources
@@ -163,8 +164,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             // It's an email - look up user by email/UPN
             try
             {
-                // Escape single quotes to prevent injection
-                var escapedInput = identityInput.Replace("'", "''");
+                var escapedInput = EscapeODataFilterValue(identityInput);
                 var users = await _graphClient.Users.GetAsync(config =>
                 {
                     config.QueryParameters.Filter = $"mail eq '{escapedInput}' or userPrincipalName eq '{escapedInput}'";
@@ -193,8 +193,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             // It's a display name - search by display name
             try
             {
-                // Escape single quotes to prevent injection
-                var escapedInput = identityInput.Replace("'", "''");
+                var escapedInput = EscapeODataFilterValue(identityInput);
                 var users = await _graphClient.Users.GetAsync(config =>
                 {
                     config.QueryParameters.Filter = $"startswith(displayName, '{escapedInput}')";
@@ -221,8 +220,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             // Try as Service Principal by display name
             try
             {
-                // Escape single quotes to prevent injection
-                var escapedInput = identityInput.Replace("'", "''");
+                var escapedInput = EscapeODataFilterValue(identityInput);
                 var sps = await _graphClient.ServicePrincipals.GetAsync(config =>
                 {
                     config.QueryParameters.Filter = $"startswith(displayName, '{escapedInput}')";
@@ -259,7 +257,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             // Try as user first
             var memberOfPage = await _graphClient.Users[principalId].MemberOf.GetAsync(config =>
             {
-                config.QueryParameters.Top = 999;
+                config.QueryParameters.Top = MaxGraphPageSize;
             });
 
             if (memberOfPage?.Value != null)
@@ -282,7 +280,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                 // Try as service principal
                 var spMemberOfPage = await _graphClient.ServicePrincipals[principalId].MemberOf.GetAsync(config =>
                 {
-                    config.QueryParameters.Top = 999;
+                    config.QueryParameters.Top = MaxGraphPageSize;
                 });
 
                 if (spMemberOfPage?.Value != null)
@@ -530,6 +528,12 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             return skipTokenElement.GetString();
         }
         return null;
+    }
+
+    private static string EscapeODataFilterValue(string value)
+    {
+        // Escape single quotes to prevent OData filter injection
+        return value.Replace("'", "''");
     }
 
     // DTO for Azure role assignments
