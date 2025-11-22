@@ -22,6 +22,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
     private readonly TokenCredential _credential;
     private readonly HttpClient _httpClient;
     private const string ResourceGraphApiEndpoint = "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01";
+    // Maximum page size supported by Microsoft Graph API
     private const int MaxGraphPageSize = 999;
     
     private const string _roleAssignmentsQuery = @"
