@@ -128,98 +128,46 @@
                 <div class="card-body">
                     @if (result.SecurityGroups.Any())
                     {
-                        @foreach (var group in result.SecurityGroups)
+                        var allGroups = GetAllGroupsFlattened(result.SecurityGroups);
+                        
+                        @foreach (var group in allGroups)
                         {
-                            var groupId = group.Id;
-                            var isExpanded = expandedGroups.Contains(groupId);
-                            
                             <div class="card mb-3">
-                                <div class="card-header d-flex justify-content-between align-items-start">
-                                    <div>
-                                        <h6 class="mb-1">@group.DisplayName</h6>
+                                <div class="card-header bg-light">
+                                    <h6 class="mb-1">@group.DisplayName</h6>
+                                    @if (!string.IsNullOrEmpty(group.Description))
+                                    {
                                         <small class="text-muted">@group.Description</small>
-                                    </div>
-                                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => ToggleGroup(groupId)">
-                                        @if (isExpanded)
-                                        {
-                                            <span>▼ Collapse</span>
-                                        }
-                                        else
-                                        {
-                                            <span>▶ Expand</span>
-                                        }
-                                    </button>
+                                    }
                                 </div>
-                                @if (isExpanded)
-                                {
-                                    <div class="card-body">
-                                        @if (group.RoleAssignments.Any())
-                                        {
-                                            <h6 class="text-muted mb-2">Role Assignments:</h6>
-                                            <div class="table-responsive mb-3">
-                                                <table class="table table-sm table-bordered">
-                                                    <thead class="table-light">
+                                <div class="card-body">
+                                    @if (group.RoleAssignments.Any())
+                                    {
+                                        <div class="table-responsive">
+                                            <table class="table table-sm table-striped">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Role Name</th>
+                                                        <th>Scope</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    @foreach (var ra in group.RoleAssignments)
+                                                    {
                                                         <tr>
-                                                            <th>Role Name</th>
-                                                            <th>Scope</th>
+                                                            <td><strong>@ra.RoleName</strong></td>
+                                                            <td><code class="text-muted">@ra.Scope</code></td>
                                                         </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        @foreach (var ra in group.RoleAssignments)
-                                                        {
-                                                            <tr>
-                                                                <td><strong>@ra.RoleName</strong></td>
-                                                                <td><code class="text-muted">@ra.Scope</code></td>
-                                                            </tr>
-                                                        }
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                        }
-                                        
-                                        @if (group.ParentGroups.Any())
-                                        {
-                                            <h6 class="text-muted mb-2">Inherited from Parent Groups:</h6>
-                                            @foreach (var parentGroup in group.ParentGroups)
-                                            {
-                                                <div class="card mb-2 border-secondary">
-                                                    <div class="card-header bg-light">
-                                                        <h6 class="mb-1">↳ @parentGroup.DisplayName</h6>
-                                                        <small class="text-muted">@parentGroup.Description</small>
-                                                    </div>
-                                                    <div class="card-body">
-                                                        @if (parentGroup.RoleAssignments.Any())
-                                                        {
-                                                            <div class="table-responsive">
-                                                                <table class="table table-sm table-bordered">
-                                                                    <thead class="table-light">
-                                                                        <tr>
-                                                                            <th>Role Name</th>
-                                                                            <th>Scope</th>
-                                                                        </tr>
-                                                                    </thead>
-                                                                    <tbody>
-                                                                        @foreach (var ra in parentGroup.RoleAssignments)
-                                                                        {
-                                                                            <tr>
-                                                                                <td><strong>@ra.RoleName</strong></td>
-                                                                                <td><code class="text-muted">@ra.Scope</code></td>
-                                                                            </tr>
-                                                                        }
-                                                                    </tbody>
-                                                                </table>
-                                                            </div>
-                                                        }
-                                                        else
-                                                        {
-                                                            <p class="text-muted mb-0">No role assignments in this parent group.</p>
-                                                        }
-                                                    </div>
-                                                </div>
-                                            }
-                                        }
-                                    </div>
-                                }
+                                                    }
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    }
+                                    else
+                                    {
+                                        <p class="text-muted mb-0">No role assignments for this group.</p>
+                                    }
+                                </div>
                             </div>
                         }
                     }
@@ -238,7 +186,6 @@
     private string identityInput = "user@example.com";
     private bool isLoading = false;
     private IdentityRoleAssignmentResult? result;
-    private HashSet<string> expandedGroups = new();
 
     private async Task LoadRoleAssignments()
     {
@@ -256,12 +203,6 @@
                 : ServiceProvider.GetRequiredService<DatabaseRoleAssignmentService>();
 
             result = await service.GetRoleAssignmentsAsync(identityInput);
-            
-            // Expand all groups by default when loading
-            if (result != null)
-            {
-                expandedGroups = result.SecurityGroups.Select(g => g.Id).ToHashSet();
-            }
         }
         finally
         {
@@ -269,15 +210,35 @@
         }
     }
 
-    private void ToggleGroup(string groupId)
+    private List<SecurityGroup> GetAllGroupsFlattened(List<SecurityGroup> groups)
     {
-        if (expandedGroups.Contains(groupId))
+        var allGroups = new List<SecurityGroup>();
+        var processedIds = new HashSet<string>();
+        
+        void AddGroupAndParents(SecurityGroup group)
         {
-            expandedGroups.Remove(groupId);
+            // Avoid duplicates
+            if (processedIds.Contains(group.Id))
+            {
+                return;
+            }
+            
+            processedIds.Add(group.Id);
+            allGroups.Add(group);
+            
+            // Recursively add parent groups
+            foreach (var parentGroup in group.ParentGroups)
+            {
+                AddGroupAndParents(parentGroup);
+            }
         }
-        else
+        
+        // Process all top-level groups
+        foreach (var group in groups)
         {
-            expandedGroups.Add(groupId);
+            AddGroupAndParents(group);
         }
+        
+        return allGroups;
     }
 }
