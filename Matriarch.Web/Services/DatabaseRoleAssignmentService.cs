@@ -91,7 +91,8 @@ public class DatabaseRoleAssignmentService : IRoleAssignmentService
         {
             Identity = identity,
             DirectRoleAssignments = directRoleAssignments,
-            SecurityGroups = securityGroups
+            SecurityGroups = securityGroups,
+            ApiPermissions = new List<ApiPermission>() // Not stored in database yet
         };
     }
 

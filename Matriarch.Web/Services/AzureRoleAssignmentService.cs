@@ -12,6 +12,7 @@ using SharedIdentity = Matriarch.Shared.Models.Identity;
 using SharedRoleAssignment = Matriarch.Shared.Models.RoleAssignment;
 using SharedSecurityGroup = Matriarch.Shared.Models.SecurityGroup;
 using SharedIdentityResult = Matriarch.Shared.Models.IdentityRoleAssignmentResult;
+using SharedApiPermission = Matriarch.Shared.Models.ApiPermission;
 
 namespace Matriarch.Web.Services;
 
@@ -98,11 +99,15 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             // Step 4: Build security group hierarchy with role assignments
             var securityGroups = await BuildSecurityGroupsAsync(groupIds, roleAssignments);
 
+            // Step 5: Fetch API permissions if this is a service principal
+            var apiPermissions = await GetApiPermissionsAsync(resolvedIdentity.ObjectId);
+
             return new SharedIdentityResult
             {
                 Identity = resolvedIdentity,
                 DirectRoleAssignments = directRoleAssignments,
-                SecurityGroups = securityGroups
+                SecurityGroups = securityGroups,
+                ApiPermissions = apiPermissions
             };
         }
         catch (Exception ex)
@@ -535,6 +540,73 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             return skipTokenElement.GetString();
         }
         return null;
+    }
+
+    private async Task<List<SharedApiPermission>> GetApiPermissionsAsync(string principalId)
+    {
+        var apiPermissions = new List<SharedApiPermission>();
+
+        try
+        {
+            // Try to get app role assignments for a service principal
+            var appRoleAssignments = await _graphClient.ServicePrincipals[principalId]
+                .AppRoleAssignments
+                .GetAsync(config =>
+                {
+                    config.QueryParameters.Top = MaxGraphPageSize;
+                });
+
+            if (appRoleAssignments?.Value != null)
+            {
+                foreach (var assignment in appRoleAssignments.Value)
+                {
+                    if (assignment.ResourceId == null || assignment.AppRoleId == null)
+                    {
+                        continue;
+                    }
+
+                    // Get the resource service principal to find the app role details
+                    try
+                    {
+                        var resourceSp = await _graphClient.ServicePrincipals[assignment.ResourceId.ToString()].GetAsync();
+                        
+                        if (resourceSp?.AppRoles != null)
+                        {
+                            var appRole = resourceSp.AppRoles.FirstOrDefault(r => r.Id == assignment.AppRoleId);
+                            
+                            apiPermissions.Add(new SharedApiPermission
+                            {
+                                Id = assignment.Id ?? string.Empty,
+                                ResourceDisplayName = resourceSp.DisplayName ?? assignment.ResourceDisplayName ?? string.Empty,
+                                ResourceId = assignment.ResourceId.ToString() ?? string.Empty,
+                                PermissionType = "Application",
+                                PermissionValue = appRole?.Value ?? string.Empty
+                            });
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Could not fetch resource details for app role assignment");
+                        
+                        // Add with limited information
+                        apiPermissions.Add(new SharedApiPermission
+                        {
+                            Id = assignment.Id ?? string.Empty,
+                            ResourceDisplayName = assignment.ResourceDisplayName ?? string.Empty,
+                            ResourceId = assignment.ResourceId.ToString() ?? string.Empty,
+                            PermissionType = "Application",
+                            PermissionValue = string.Empty
+                        });
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not fetch API permissions (identity may not be a service principal)");
+        }
+
+        return apiPermissions;
     }
 
     private static string EscapeODataFilterValue(string value)

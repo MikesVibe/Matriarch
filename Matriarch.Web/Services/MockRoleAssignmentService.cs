@@ -104,11 +104,33 @@ public class MockRoleAssignmentService : IRoleAssignmentService
         // Simulate that this user is member of the first two security groups
         var userSecurityGroups = _mockSecurityGroups.Take(2).ToList();
 
+        // Mock API permissions
+        var apiPermissions = new List<ApiPermission>
+        {
+            new ApiPermission
+            {
+                Id = "api-1",
+                ResourceDisplayName = "Microsoft Graph",
+                ResourceId = "00000003-0000-0000-c000-000000000000",
+                PermissionType = "Application",
+                PermissionValue = "User.Read.All"
+            },
+            new ApiPermission
+            {
+                Id = "api-2",
+                ResourceDisplayName = "Microsoft Graph",
+                ResourceId = "00000003-0000-0000-c000-000000000000",
+                PermissionType = "Application",
+                PermissionValue = "Directory.Read.All"
+            }
+        };
+
         var result = new IdentityRoleAssignmentResult
         {
             Identity = identity,
             DirectRoleAssignments = _mockRoleAssignments,
-            SecurityGroups = userSecurityGroups
+            SecurityGroups = userSecurityGroups,
+            ApiPermissions = apiPermissions
         };
 
         return Task.FromResult(result);

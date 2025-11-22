@@ -1,3 +1,4 @@
+@page "/"
 @page "/roleassignments"
 @using Matriarch.Shared.Models
 @using Matriarch.Web.Services
@@ -26,7 +27,7 @@
                     <div class="col-md-6"></div>
                     <div class="col-md-12">
                         <label for="identityInput" class="form-label">Identity (Email, Object ID, or Name):</label>
-                        <input type="text" class="form-control" id="identityInput" @bind="identityInput" placeholder="e.g., user@example.com or 12345678-1234-1234-1234-123456789abc or John Doe" />
+                        <input type="text" class="form-control" id="identityInput" @bind="identityInput" placeholder="user@example.com" />
                         <div class="form-text">Enter an email address, object ID (GUID), or display name. The system will auto-detect the type and query Entra ID for validation.</div>
                     </div>
                 </div>
@@ -236,11 +237,51 @@
             </div>
         </div>
     </div>
+
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header bg-dark text-white">
+                    <h5>API Permissions</h5>
+                </div>
+                <div class="card-body">
+                    @if (result.ApiPermissions.Any())
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-striped table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Resource</th>
+                                        <th>Permission</th>
+                                        <th>Type</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var permission in result.ApiPermissions)
+                                    {
+                                        <tr>
+                                            <td><strong>@permission.ResourceDisplayName</strong></td>
+                                            <td><code>@permission.PermissionValue</code></td>
+                                            <td><span class="badge bg-secondary">@permission.PermissionType</span></td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                    else
+                    {
+                        <p class="text-muted mb-0">No API permissions found (identity may not be a service principal).</p>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
 }
 
 @code {
     private string dataSource = "Azure";
-    private string identityInput = "user@example.com";
+    private string identityInput = "";
     private bool isLoading = false;
     private IdentityRoleAssignmentResult? result;
 

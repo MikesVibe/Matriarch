@@ -16,6 +16,15 @@ public class RoleAssignment
     public string AssignedTo { get; set; } = string.Empty;
 }
 
+public class ApiPermission
+{
+    public string Id { get; set; } = string.Empty;
+    public string ResourceDisplayName { get; set; } = string.Empty;
+    public string ResourceId { get; set; } = string.Empty;
+    public string PermissionType { get; set; } = string.Empty;
+    public string PermissionValue { get; set; } = string.Empty;
+}
+
 public class SecurityGroup
 {
     public string Id { get; set; } = string.Empty;
@@ -30,4 +39,5 @@ public class IdentityRoleAssignmentResult
     public Identity Identity { get; set; } = new();
     public List<RoleAssignment> DirectRoleAssignments { get; set; } = new();
     public List<SecurityGroup> SecurityGroups { get; set; } = new();
+    public List<ApiPermission> ApiPermissions { get; set; } = new();
 }
