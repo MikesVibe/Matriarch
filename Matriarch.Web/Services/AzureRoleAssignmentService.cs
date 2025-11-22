@@ -362,11 +362,10 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
         List<AzureRoleAssignmentDto> roleAssignments)
     {
         var securityGroups = new List<SharedSecurityGroup>();
-        var allProcessedGroups = new HashSet<string>(); // Global tracking to ensure each group appears once
 
         foreach (var groupId in groupIds)
         {
-            var group = await BuildSecurityGroupAsync(groupId, roleAssignments, allProcessedGroups, new HashSet<string>());
+            var group = await BuildSecurityGroupAsync(groupId, roleAssignments, new HashSet<string>());
             if (group != null)
             {
                 securityGroups.Add(group);
@@ -379,7 +378,6 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
     private async Task<SharedSecurityGroup?> BuildSecurityGroupAsync(
         string groupId,
         List<AzureRoleAssignmentDto> allRoleAssignments,
-        HashSet<string> allProcessedGroups,
         HashSet<string> currentPath)
     {
         // Prevent infinite loops - if this group is in the current path, we have a circular reference
@@ -387,15 +385,6 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
         {
             return null;
         }
-
-        // If we've already fully processed this group globally, return null to avoid duplication
-        if (allProcessedGroups.Contains(groupId))
-        {
-            return null;
-        }
-
-        // Mark this group as globally processed
-        allProcessedGroups.Add(groupId);
 
         // Add to current path for circular reference detection
         currentPath.Add(groupId);
@@ -437,9 +426,9 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                     {
                         if (!string.IsNullOrEmpty(parentGroup.Id))
                         {
-                            // Use the same allProcessedGroups but a new path copy for each parent branch
+                            // Create a new path copy for each parent branch to properly detect circular references
                             var newPath = new HashSet<string>(currentPath);
-                            var securityParentGroup = await BuildSecurityGroupAsync(parentGroup.Id, allRoleAssignments, allProcessedGroups, newPath);
+                            var securityParentGroup = await BuildSecurityGroupAsync(parentGroup.Id, allRoleAssignments, newPath);
                             if (securityParentGroup != null)
                             {
                                 parentGroups.Add(securityParentGroup);
