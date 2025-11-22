@@ -1,7 +1,7 @@
 @page "/roleassignments"
 @using Matriarch.Shared.Models
 @using Matriarch.Web.Services
-@inject IRoleAssignmentService RoleAssignmentService
+@inject IServiceProvider ServiceProvider
 @rendermode InteractiveServer
 
 <PageTitle>Identity Role Assignments</PageTitle>
@@ -16,6 +16,14 @@
             </div>
             <div class="card-body">
                 <div class="row g-3">
+                    <div class="col-md-6">
+                        <label for="dataSource" class="form-label">Data Source:</label>
+                        <select class="form-select" id="dataSource" @bind="dataSource">
+                            <option value="Local">Local Database</option>
+                            <option value="Azure">Azure (Direct)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6"></div>
                     <div class="col-md-6">
                         <label for="objectId" class="form-label">Object ID:</label>
                         <input type="text" class="form-control" id="objectId" @bind="objectId" placeholder="e.g., 12345678-1234-1234-1234-123456789abc" />
@@ -45,6 +53,10 @@
                             <span>Load Role Assignments</span>
                         }
                     </button>
+                    @if (!string.IsNullOrEmpty(dataSource))
+                    {
+                        <span class="ms-3 text-muted">Using: <strong>@dataSource</strong></span>
+                    }
                 </div>
             </div>
         </div>
@@ -233,6 +245,7 @@
 }
 
 @code {
+    private string dataSource = "Local";
     private string objectId = "12345678-1234-1234-1234-123456789abc";
     private string applicationId = "87654321-4321-4321-4321-cba987654321";
     private string email = "john.doe@example.com";
@@ -246,7 +259,13 @@
         isLoading = true;
         try
         {
-            result = await RoleAssignmentService.GetRoleAssignmentsAsync(objectId, applicationId, email, userName);
+            // Get the appropriate service based on data source selection
+            IRoleAssignmentService service = dataSource == "Azure"
+                ? ServiceProvider.GetRequiredService<AzureRoleAssignmentService>()
+                : ServiceProvider.GetRequiredService<DatabaseRoleAssignmentService>();
+
+            result = await service.GetRoleAssignmentsAsync(objectId, applicationId, email, userName);
+            
             // Expand all groups by default when loading
             if (result != null)
             {

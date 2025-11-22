@@ -1,3 +1,4 @@
+using Matriarch.Configuration;
 using Matriarch.Data;
 using Matriarch.Web.Components;
 using Matriarch.Web.Services;
@@ -9,12 +10,21 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
+// Bind and register AppSettings for Azure configuration
+var appSettings = new AppSettings();
+builder.Configuration.Bind(appSettings);
+builder.Services.AddSingleton(appSettings);
+
 // Register SQLite DbContext
 var connectionString = builder.Configuration.GetConnectionString("MatriarchDb");
 builder.Services.AddDbContext<MatriarchDbContext>(options =>
     options.UseSqlite(connectionString));
 
-// Register custom services
+// Register custom services for role assignments
+builder.Services.AddScoped<DatabaseRoleAssignmentService>();
+builder.Services.AddScoped<AzureRoleAssignmentService>();
+
+// Keep DatabaseRoleAssignmentService as default for backward compatibility
 builder.Services.AddScoped<IRoleAssignmentService, DatabaseRoleAssignmentService>();
 
 var app = builder.Build();
