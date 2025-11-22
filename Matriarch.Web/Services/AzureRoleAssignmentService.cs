@@ -163,9 +163,11 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             // It's an email - look up user by email/UPN
             try
             {
+                // Escape single quotes to prevent injection
+                var escapedInput = identityInput.Replace("'", "''");
                 var users = await _graphClient.Users.GetAsync(config =>
                 {
-                    config.QueryParameters.Filter = $"mail eq '{identityInput}' or userPrincipalName eq '{identityInput}'";
+                    config.QueryParameters.Filter = $"mail eq '{escapedInput}' or userPrincipalName eq '{escapedInput}'";
                     config.QueryParameters.Top = 1;
                 });
 
@@ -191,9 +193,11 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             // It's a display name - search by display name
             try
             {
+                // Escape single quotes to prevent injection
+                var escapedInput = identityInput.Replace("'", "''");
                 var users = await _graphClient.Users.GetAsync(config =>
                 {
-                    config.QueryParameters.Filter = $"startswith(displayName, '{identityInput}')";
+                    config.QueryParameters.Filter = $"startswith(displayName, '{escapedInput}')";
                     config.QueryParameters.Top = 1;
                 });
 
@@ -217,9 +221,11 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             // Try as Service Principal by display name
             try
             {
+                // Escape single quotes to prevent injection
+                var escapedInput = identityInput.Replace("'", "''");
                 var sps = await _graphClient.ServicePrincipals.GetAsync(config =>
                 {
-                    config.QueryParameters.Filter = $"startswith(displayName, '{identityInput}')";
+                    config.QueryParameters.Filter = $"startswith(displayName, '{escapedInput}')";
                     config.QueryParameters.Top = 1;
                 });
 
@@ -311,8 +317,16 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
         var roleAssignments = new List<AzureRoleAssignmentDto>();
         var token = await GetAuthorizationTokenAsync();
 
-        // Build filter for specific principals
-        var principalFilter = string.Join(" or ", principalIds.Select(id => $"principalId == '{id}'"));
+        // Validate that all principalIds are valid GUIDs to prevent injection
+        var validatedIds = principalIds.Where(id => Guid.TryParse(id, out _)).ToList();
+        if (!validatedIds.Any())
+        {
+            _logger.LogWarning("No valid GUID principal IDs provided");
+            return new List<AzureRoleAssignmentDto>();
+        }
+
+        // Build filter for specific principals (safe now that we've validated GUIDs)
+        var principalFilter = string.Join(" or ", validatedIds.Select(id => $"principalId == '{id}'"));
         
         var query = $@"
             authorizationresources
@@ -362,7 +376,6 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
 
         return securityGroups;
     }
-
 
 
     private async Task<SharedSecurityGroup?> BuildSecurityGroupAsync(

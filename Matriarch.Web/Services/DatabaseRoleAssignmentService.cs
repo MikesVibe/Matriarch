@@ -26,25 +26,24 @@ public class DatabaseRoleAssignmentService : IRoleAssignmentService
         if (Guid.TryParse(identityInput, out _))
         {
             objectId = identityInput;
-            // Try to find additional info in database if available
-            // This is a simplified version - in reality you'd query your identity table
+            // TODO: Query identity table to find additional info (email, name) by objectId
         }
         else if (identityInput.Contains("@"))
         {
             email = identityInput;
-            // Try to find objectId from email in database
+            // TODO: Query identity table to find objectId from email
         }
         else
         {
             name = identityInput;
-            // Try to find objectId from name in database
+            // TODO: Query identity table to find objectId from name
         }
 
         var identity = new Identity
         {
-            ObjectId = objectId ?? "Unknown",
-            ApplicationId = applicationId ?? "Unknown",
-            Email = email ?? "Unknown",
+            ObjectId = objectId ?? string.Empty,
+            ApplicationId = applicationId ?? string.Empty,
+            Email = email ?? string.Empty,
             Name = name ?? identityInput
         };
 
