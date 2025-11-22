@@ -13,33 +13,65 @@ public class DatabaseRoleAssignmentService : IRoleAssignmentService
         _dbContext = dbContext;
     }
 
-    public async Task<IdentityRoleAssignmentResult> GetRoleAssignmentsAsync(string objectId, string applicationId, string email, string name)
+    public async Task<IdentityRoleAssignmentResult> GetRoleAssignmentsAsync(string identityInput)
     {
+        // Try to find the identity in the database
+        // Search by ObjectId (GUID), Email, or Name
+        string? objectId = null;
+        string? applicationId = null;
+        string? email = null;
+        string? name = null;
+
+        // Check if input is a GUID
+        if (Guid.TryParse(identityInput, out _))
+        {
+            objectId = identityInput;
+            // TODO: Query identity table to find additional info (email, name) by objectId
+        }
+        else if (identityInput.Contains("@"))
+        {
+            email = identityInput;
+            // TODO: Query identity table to find objectId from email
+        }
+        else
+        {
+            name = identityInput;
+            // TODO: Query identity table to find objectId from name
+        }
+
         var identity = new Identity
         {
-            ObjectId = objectId,
-            ApplicationId = applicationId,
-            Email = email,
-            Name = name
+            ObjectId = objectId ?? string.Empty,
+            ApplicationId = applicationId ?? string.Empty,
+            Email = email ?? string.Empty,
+            Name = name ?? string.Empty
         };
 
-        // Get direct role assignments for this principal (by objectId or applicationId)
-        var directRoleAssignments = await _dbContext.RoleAssignments
-            .Where(ra => ra.PrincipalId == objectId || ra.PrincipalId == applicationId)
-            .Select(ra => new RoleAssignment
-            {
-                Id = ra.Id,
-                RoleName = ra.RoleName,
-                Scope = ra.Scope,
-                AssignedTo = "Direct Assignment"
-            })
-            .ToListAsync();
+        // Only query database if we have a valid objectId (GUID)
+        // PrincipalId and MemberId fields in the database are GUIDs
+        var directRoleAssignments = new List<RoleAssignment>();
+        var directGroupIds = new List<string>();
 
-        // Get security groups this identity is a member of (directly)
-        var directGroupIds = await _dbContext.GroupMemberships
-            .Where(gm => gm.MemberId == objectId || gm.MemberId == applicationId)
-            .Select(gm => gm.GroupId)
-            .ToListAsync();
+        if (!string.IsNullOrEmpty(objectId))
+        {
+            // Get direct role assignments for this principal
+            directRoleAssignments = await _dbContext.RoleAssignments
+                .Where(ra => ra.PrincipalId == objectId)
+                .Select(ra => new RoleAssignment
+                {
+                    Id = ra.Id,
+                    RoleName = ra.RoleName,
+                    Scope = ra.Scope,
+                    AssignedTo = "Direct Assignment"
+                })
+                .ToListAsync();
+
+            // Get security groups this identity is a member of (directly)
+            directGroupIds = await _dbContext.GroupMemberships
+                .Where(gm => gm.MemberId == objectId)
+                .Select(gm => gm.GroupId)
+                .ToListAsync();
+        }
 
         // Build security groups with role assignments and handle circular dependencies
         // Use a shared set to track all processed groups across the entire query
