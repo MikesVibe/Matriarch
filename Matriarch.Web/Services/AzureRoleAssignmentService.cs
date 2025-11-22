@@ -25,6 +25,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
     private const string ResourceGraphApiEndpoint = "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01";
     // Maximum page size supported by Microsoft Graph API
     private const int MaxGraphPageSize = 999;
+    private const string ApplicationPermissionType = "Application";
     
     private const string _roleAssignmentsQuery = @"
         authorizationresources
@@ -579,7 +580,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                                 Id = assignment.Id ?? string.Empty,
                                 ResourceDisplayName = resourceSp.DisplayName ?? assignment.ResourceDisplayName ?? string.Empty,
                                 ResourceId = assignment.ResourceId.ToString() ?? string.Empty,
-                                PermissionType = "Application",
+                                PermissionType = ApplicationPermissionType,
                                 PermissionValue = appRole?.Value ?? string.Empty
                             });
                         }
@@ -594,7 +595,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                             Id = assignment.Id ?? string.Empty,
                             ResourceDisplayName = assignment.ResourceDisplayName ?? string.Empty,
                             ResourceId = assignment.ResourceId.ToString() ?? string.Empty,
-                            PermissionType = "Application",
+                            PermissionType = ApplicationPermissionType,
                             PermissionValue = string.Empty
                         });
                     }
