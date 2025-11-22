@@ -362,11 +362,11 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
         List<AzureRoleAssignmentDto> roleAssignments)
     {
         var securityGroups = new List<SharedSecurityGroup>();
-        var processedGroups = new HashSet<string>();
+        var allProcessedGroups = new HashSet<string>(); // Global tracking to ensure each group appears once
 
         foreach (var groupId in groupIds)
         {
-            var group = await BuildSecurityGroupAsync(groupId, roleAssignments, processedGroups);
+            var group = await BuildSecurityGroupAsync(groupId, roleAssignments, allProcessedGroups, new HashSet<string>());
             if (group != null)
             {
                 securityGroups.Add(group);
@@ -376,19 +376,29 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
         return securityGroups;
     }
 
-
     private async Task<SharedSecurityGroup?> BuildSecurityGroupAsync(
         string groupId,
         List<AzureRoleAssignmentDto> allRoleAssignments,
-        HashSet<string> processedGroups)
+        HashSet<string> allProcessedGroups,
+        HashSet<string> currentPath)
     {
-        // Prevent circular references
-        if (processedGroups.Contains(groupId))
+        // Prevent infinite loops - if this group is in the current path, we have a circular reference
+        if (currentPath.Contains(groupId))
         {
             return null;
         }
 
-        processedGroups.Add(groupId);
+        // If we've already fully processed this group globally, return null to avoid duplication
+        if (allProcessedGroups.Contains(groupId))
+        {
+            return null;
+        }
+
+        // Mark this group as globally processed
+        allProcessedGroups.Add(groupId);
+
+        // Add to current path for circular reference detection
+        currentPath.Add(groupId);
 
         try
         {
@@ -416,7 +426,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             var parentGroups = new List<SharedSecurityGroup>();
             var memberOfPage = await _graphClient.Groups[groupId].MemberOf.GetAsync(config =>
             {
-                config.QueryParameters.Top = 999;
+                config.QueryParameters.Top = MaxGraphPageSize;
             });
 
             if (memberOfPage?.Value != null)
@@ -427,7 +437,9 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                     {
                         if (!string.IsNullOrEmpty(parentGroup.Id))
                         {
-                            var securityParentGroup = await BuildSecurityGroupAsync(parentGroup.Id, allRoleAssignments, processedGroups);
+                            // Use the same allProcessedGroups but a new path copy for each parent branch
+                            var newPath = new HashSet<string>(currentPath);
+                            var securityParentGroup = await BuildSecurityGroupAsync(parentGroup.Id, allRoleAssignments, allProcessedGroups, newPath);
                             if (securityParentGroup != null)
                             {
                                 parentGroups.Add(securityParentGroup);
@@ -436,6 +448,9 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                     }
                 }
             }
+
+            // Remove from current path before returning
+            currentPath.Remove(groupId);
 
             return new SharedSecurityGroup
             {
@@ -449,6 +464,8 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Error building security group {GroupId}", groupId);
+            // Remove from current path on error as well
+            currentPath.Remove(groupId);
             return null;
         }
     }
