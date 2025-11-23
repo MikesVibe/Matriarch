@@ -240,6 +240,10 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                             AppRegistrationId = app.Id // Use the App Registration ObjectId we already have
                         };
                     }
+                    else
+                    {
+                        _logger.LogWarning("Found App Registration (ObjectId: {ObjectId}, AppId: {AppId}) but no corresponding Enterprise Application exists in this tenant", app.Id, app.AppId);
+                    }
                 }
             }
             catch (Exception ex)
