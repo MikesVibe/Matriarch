@@ -156,22 +156,22 @@
                         <dd class="col-sm-9">
                             <span class="badge bg-primary">@GetIdentityTypeDisplay(result.Identity.Type)</span>
                         </dd>
-                        
+
                         <dt class="col-sm-3">Name:</dt>
                         <dd class="col-sm-9">@result.Identity.Name</dd>
-                        
+
                         @if (result.Identity.Type == IdentityType.User)
                         {
                             <dt class="col-sm-3">Email:</dt>
                             <dd class="col-sm-9">@result.Identity.Email</dd>
                         }
-                        
+
                         @if (result.Identity.Type == IdentityType.User || result.Identity.Type == IdentityType.Group)
                         {
                             <dt class="col-sm-3">Object ID:</dt>
                             <dd class="col-sm-9"><code>@result.Identity.ObjectId</code></dd>
                         }
-                        
+
                         @if (result.Identity.Type != IdentityType.User && result.Identity.Type != IdentityType.Group)
                         {
                             @if (!string.IsNullOrEmpty(result.Identity.ApplicationId))
@@ -242,12 +242,10 @@
                     <h5>Direct Group Memberships</h5>
                 </div>
                 <div class="card-body">
-                    @if (result.SecurityGroups.Any())
+                    @if (result.SecurityDirectGroups.Any())
                     {
-                        var (directGroups, indirectGroups) = GetDirectAndIndirectGroups(result.SecurityGroups);
-                        
                         <ul class="list-group">
-                            @foreach (var group in directGroups)
+                            @foreach (var group in result.SecurityDirectGroups)
                             {
                                 <li class="list-group-item">
                                     <strong>@group.DisplayName</strong>
@@ -276,30 +274,21 @@
                     <h5>Indirect Group Memberships (via parent groups)</h5>
                 </div>
                 <div class="card-body">
-                    @if (result.SecurityGroups.Any())
+                    @if (result.SecurityIndirectGroups.Any())
                     {
-                        var (directGroups, indirectGroups) = GetDirectAndIndirectGroups(result.SecurityGroups);
-                        
-                        @if (indirectGroups.Any())
-                        {
-                            <ul class="list-group">
-                                @foreach (var group in indirectGroups)
-                                {
-                                    <li class="list-group-item">
-                                        <strong>@group.DisplayName</strong>
-                                        @if (!string.IsNullOrEmpty(group.Description))
-                                        {
-                                            <br />
-                                            <small class="text-muted">@group.Description</small>
-                                        }
-                                    </li>
-                                }
-                            </ul>
-                        }
-                        else
-                        {
-                            <p class="text-muted mb-0">No indirect group memberships.</p>
-                        }
+                        <ul class="list-group">
+                            @foreach (var group in result.SecurityIndirectGroups)
+                            {
+                                <li class="list-group-item">
+                                    <strong>@group.DisplayName</strong>
+                                    @if (!string.IsNullOrEmpty(group.Description))
+                                    {
+                                        <br />
+                                        <small class="text-muted">@group.Description</small>
+                                    }
+                                </li>
+                            }
+                        </ul>
                     }
                     else
                     {
@@ -414,12 +403,12 @@
         result = null;
         searchResult = null;
         selectedIdentity = null;
-        
+
         try
         {
             // First, search for identities
             searchResult = await _roleAssignmentService.SearchIdentitiesAsync(identityInput);
-            
+
             if (searchResult.Identities.Count == 0)
             {
                 errorMessage = $"Identity '{identityInput}' could not be found in the tenant. Please verify the input and try again.";
@@ -472,41 +461,6 @@
         selectedIdentity = identity;
     }
 
-    private (List<SecurityGroup> directGroups, List<SecurityGroup> indirectGroups) GetDirectAndIndirectGroups(List<SecurityGroup> groups)
-    {
-        var directGroups = new List<SecurityGroup>();
-        var indirectGroups = new List<SecurityGroup>();
-        var processedIds = new HashSet<string>();
-        
-        // Add direct groups (top-level groups the user is a member of)
-        foreach (var group in groups)
-        {
-            directGroups.Add(group);
-            processedIds.Add(group.Id);
-        }
-        
-        // Recursively collect all indirect groups (parent groups)
-        void CollectParentGroups(SecurityGroup group)
-        {
-            foreach (var parentGroup in group.ParentGroups)
-            {
-                if (!processedIds.Contains(parentGroup.Id))
-                {
-                    processedIds.Add(parentGroup.Id);
-                    indirectGroups.Add(parentGroup);
-                    CollectParentGroups(parentGroup);
-                }
-            }
-        }
-        
-        foreach (var group in groups)
-        {
-            CollectParentGroups(group);
-        }
-        
-        return (directGroups, indirectGroups);
-    }
-
     private string GetIdentityTypeDisplay(IdentityType identityType)
     {
         return identityType switch
@@ -529,7 +483,7 @@
 
         var allRoleAssignments = new List<RoleAssignment>();
         var processedIds = new HashSet<string>();
-        
+
         // Collect role assignments from all groups
         void CollectRoleAssignments(SecurityGroup group)
         {
@@ -543,18 +497,17 @@
                     allRoleAssignments.Add(ra);
                 }
             }
-            
-            foreach (var parentGroup in group.ParentGroups)
-            {
-                CollectRoleAssignments(parentGroup);
-            }
         }
-        
-        foreach (var group in result.SecurityGroups)
+
+        foreach (var group in result.SecurityDirectGroups)
         {
             CollectRoleAssignments(group);
         }
-        
+        foreach (var group in result.SecurityIndirectGroups)
+        {
+            CollectRoleAssignments(group);
+        }
+
         return allRoleAssignments;
     }
 }

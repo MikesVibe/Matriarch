@@ -50,7 +50,8 @@ public class IdentityRoleAssignmentResult
 {
     public Identity Identity { get; set; } = new();
     public List<RoleAssignment> DirectRoleAssignments { get; set; } = new();
-    public List<SecurityGroup> SecurityGroups { get; set; } = new();
+    public List<SecurityGroup> SecurityDirectGroups { get; set; } = new();
+    public List<SecurityGroup> SecurityIndirectGroups { get; set; } = new();
     public List<ApiPermission> ApiPermissions { get; set; } = new();
 }
 

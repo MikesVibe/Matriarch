@@ -189,16 +189,15 @@ public class GroupManagementService : IGroupManagementService
     }
 
     public List<SharedSecurityGroup> BuildSecurityGroupsWithPreFetchedData(
-        List<string> directGroupIds,
+        List<string> groupIds,
         Dictionary<string, GroupInfo> groupInfoMap,
         List<AzureRoleAssignmentDto> roleAssignments)
     {
         var securityGroups = new List<SharedSecurityGroup>();
-        var processedGroups = new HashSet<string>();
 
-        foreach (var groupId in directGroupIds)
+        foreach (var groupId in groupIds)
         {
-            var group = BuildSecurityGroupWithPreFetchedData(groupId, groupInfoMap, roleAssignments, processedGroups);
+            var group = BuildSecurityGroupWithPreFetchedDataMiki(groupId, groupInfoMap, roleAssignments);
             if (group != null)
             {
                 securityGroups.Add(group);
@@ -208,27 +207,17 @@ public class GroupManagementService : IGroupManagementService
         return securityGroups;
     }
 
-    private SharedSecurityGroup? BuildSecurityGroupWithPreFetchedData(
-        string groupId,
-        Dictionary<string, GroupInfo> groupInfoMap,
-        List<AzureRoleAssignmentDto> allRoleAssignments,
-        HashSet<string> processedGroups)
+    private SharedSecurityGroup? BuildSecurityGroupWithPreFetchedDataMiki(
+      string groupId,
+      Dictionary<string, GroupInfo> groupInfoMap,
+      List<AzureRoleAssignmentDto> allRoleAssignments)
     {
-        // Prevent infinite loops - if this group is already being processed, skip it
-        if (processedGroups.Contains(groupId))
-        {
-            return null;
-        }
-
         // Check if we have info for this group
         if (!groupInfoMap.TryGetValue(groupId, out var groupInfo))
         {
             _logger.LogWarning("Group info not found for {GroupId}", groupId);
             return null;
         }
-
-        // Mark this group as being processed
-        processedGroups.Add(groupId);
 
         // Get role assignments for this group
         var groupRoleAssignments = allRoleAssignments
@@ -242,24 +231,12 @@ public class GroupManagementService : IGroupManagementService
             })
             .ToList();
 
-        // Build parent groups using pre-fetched data - simple matching with groupInfoMap
-        var parentGroups = new List<SharedSecurityGroup>();
-        foreach (var parentGroupId in groupInfo.ParentGroupIds)
-        {
-            var parentGroup = BuildSecurityGroupWithPreFetchedData(parentGroupId, groupInfoMap, allRoleAssignments, processedGroups);
-            if (parentGroup != null)
-            {
-                parentGroups.Add(parentGroup);
-            }
-        }
-
         return new SharedSecurityGroup
         {
             Id = groupInfo.Id,
             DisplayName = groupInfo.DisplayName,
             Description = groupInfo.Description,
             RoleAssignments = groupRoleAssignments,
-            ParentGroups = parentGroups
         };
     }
 }

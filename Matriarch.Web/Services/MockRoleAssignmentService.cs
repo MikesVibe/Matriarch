@@ -131,7 +131,7 @@ public class MockRoleAssignmentService : IRoleAssignmentService
         {
             Identity = identity,
             DirectRoleAssignments = _mockRoleAssignments,
-            SecurityGroups = userSecurityGroups,
+            //SecurityGroups = userSecurityGroups,
             ApiPermissions = apiPermissions
         };
 
