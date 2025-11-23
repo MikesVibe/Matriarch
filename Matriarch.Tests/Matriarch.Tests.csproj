@@ -21,9 +21,4 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\Matriarch\Matriarch.csproj" />
-    <ProjectReference Include="..\Matriarch.Shared\Matriarch.Shared.csproj" />
-  </ItemGroup>
-
 </Project>

@@ -1,8 +1,8 @@
 @page "/"
 @page "/roleassignments"
-@using Matriarch.Shared.Models
+@using Matriarch.Web.Models
 @using Matriarch.Web.Services
-@inject IServiceProvider ServiceProvider
+@inject IRoleAssignmentService _roleAssignmentService
 @rendermode InteractiveServer
 
 <PageTitle>Identity Role Assignments</PageTitle>
@@ -88,7 +88,7 @@
                         <dt class="col-sm-3">Name:</dt>
                         <dd class="col-sm-9">@result.Identity.Name</dd>
                         
-                        @if (result.Identity.Type == Matriarch.Shared.Models.IdentityType.User)
+                        @if (result.Identity.Type == IdentityType.User)
                         {
                             <dt class="col-sm-3">Email:</dt>
                             <dd class="col-sm-9">@result.Identity.Email</dd>
@@ -97,13 +97,13 @@
                         <dt class="col-sm-3">Object ID:</dt>
                         <dd class="col-sm-9"><code>@result.Identity.ObjectId</code></dd>
                         
-                        @if (result.Identity.Type != Matriarch.Shared.Models.IdentityType.User && result.Identity.Type != Matriarch.Shared.Models.IdentityType.Group && !string.IsNullOrEmpty(result.Identity.ApplicationId))
+                        @if (result.Identity.Type != IdentityType.User && result.Identity.Type != IdentityType.Group && !string.IsNullOrEmpty(result.Identity.ApplicationId))
                         {
                             <dt class="col-sm-3">Application ID:</dt>
                             <dd class="col-sm-9"><code>@result.Identity.ApplicationId</code></dd>
                         }
                         
-                        @if (!string.IsNullOrEmpty(result.Identity.AppRegistrationId) && (result.Identity.Type == Matriarch.Shared.Models.IdentityType.ServicePrincipal || result.Identity.Type == Matriarch.Shared.Models.IdentityType.UserAssignedManagedIdentity))
+                        @if (!string.IsNullOrEmpty(result.Identity.AppRegistrationId) && (result.Identity.Type == IdentityType.ServicePrincipal || result.Identity.Type == IdentityType.UserAssignedManagedIdentity))
                         {
                             <dt class="col-sm-3">App Registration:</dt>
                             <dd class="col-sm-9"><code>@result.Identity.AppRegistrationId</code></dd>
@@ -333,12 +333,7 @@
         
         try
         {
-            // Get the appropriate service based on data source selection
-            IRoleAssignmentService service = dataSource == "Azure"
-                ? ServiceProvider.GetRequiredService<AzureRoleAssignmentService>()
-                : ServiceProvider.GetRequiredService<DatabaseRoleAssignmentService>();
-
-            result = await service.GetRoleAssignmentsAsync(identityInput);
+            result = await _roleAssignmentService.GetRoleAssignmentsAsync(identityInput);
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("Could not resolve identity"))
         {
@@ -389,15 +384,15 @@
         return (directGroups, indirectGroups);
     }
 
-    private string GetIdentityTypeDisplay(Matriarch.Shared.Models.IdentityType identityType)
+    private string GetIdentityTypeDisplay(IdentityType identityType)
     {
         return identityType switch
         {
-            Matriarch.Shared.Models.IdentityType.User => "User",
-            Matriarch.Shared.Models.IdentityType.Group => "Group",
-            Matriarch.Shared.Models.IdentityType.ServicePrincipal => "Service Principal",
-            Matriarch.Shared.Models.IdentityType.UserAssignedManagedIdentity => "User-Assigned Managed Identity",
-            Matriarch.Shared.Models.IdentityType.SystemAssignedManagedIdentity => "System-Assigned Managed Identity",
+            IdentityType.User => "User",
+            IdentityType.Group => "Group",
+            IdentityType.ServicePrincipal => "Service Principal",
+            IdentityType.UserAssignedManagedIdentity => "User-Assigned Managed Identity",
+            IdentityType.SystemAssignedManagedIdentity => "System-Assigned Managed Identity",
             _ => "Unknown"
         };
     }

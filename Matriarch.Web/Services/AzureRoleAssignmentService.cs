@@ -1,18 +1,20 @@
 using Azure.Core;
 using Azure.Identity;
-using Matriarch.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Graph.Beta;
 using Microsoft.Graph.Beta.Models;
 using Microsoft.Kiota.Abstractions;
+using Azure.Core;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
-using SharedIdentity = Matriarch.Shared.Models.Identity;
-using SharedRoleAssignment = Matriarch.Shared.Models.RoleAssignment;
-using SharedSecurityGroup = Matriarch.Shared.Models.SecurityGroup;
-using SharedIdentityResult = Matriarch.Shared.Models.IdentityRoleAssignmentResult;
-using SharedApiPermission = Matriarch.Shared.Models.ApiPermission;
+using SharedIdentity = Matriarch.Web.Models.Identity;
+using SharedRoleAssignment = Matriarch.Web.Models.RoleAssignment;
+using SharedSecurityGroup = Matriarch.Web.Models.SecurityGroup;
+using SharedIdentityResult = Matriarch.Web.Models.IdentityRoleAssignmentResult;
+using SharedApiPermission = Matriarch.Web.Models.ApiPermission;
+using Matriarch.Web.Models;
+using Matriarch.Web.Configuration;
 
 namespace Matriarch.Web.Services;
 
@@ -141,7 +143,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                         ApplicationId = "",
                         Email = user.Mail ?? user.UserPrincipalName ?? "",
                         Name = user.DisplayName ?? "",
-                        Type = Matriarch.Shared.Models.IdentityType.User
+                        Type = IdentityType.User
                     };
                 }
             }
@@ -219,7 +221,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                         ApplicationId = "",
                         Email = "",
                         Name = group.DisplayName ?? "",
-                        Type = Matriarch.Shared.Models.IdentityType.Group
+                        Type = IdentityType.Group
                     };
                 }
             }
@@ -249,7 +251,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                         ApplicationId = "",
                         Email = user.Mail ?? user.UserPrincipalName ?? identityInput,
                         Name = user.DisplayName ?? "",
-                        Type = Matriarch.Shared.Models.IdentityType.User
+                        Type = IdentityType.User
                     };
                 }
             }
@@ -279,7 +281,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                         ApplicationId = "",
                         Email = user.Mail ?? user.UserPrincipalName ?? "",
                         Name = user.DisplayName ?? identityInput,
-                        Type = Matriarch.Shared.Models.IdentityType.User
+                        Type = IdentityType.User
                     };
                 }
             }
@@ -339,7 +341,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                         ApplicationId = "",
                         Email = "",
                         Name = group.DisplayName ?? identityInput,
-                        Type = Matriarch.Shared.Models.IdentityType.Group
+                        Type = IdentityType.Group
                     };
                 }
             }
@@ -353,13 +355,13 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
         return null;
     }
 
-    private static Matriarch.Shared.Models.IdentityType DetermineServicePrincipalType(string? servicePrincipalType)
+    private static IdentityType DetermineServicePrincipalType(string? servicePrincipalType)
     {
         return servicePrincipalType switch
         {
-            "ManagedIdentity" => Matriarch.Shared.Models.IdentityType.UserAssignedManagedIdentity,
-            "Application" => Matriarch.Shared.Models.IdentityType.ServicePrincipal,
-            _ => Matriarch.Shared.Models.IdentityType.ServicePrincipal
+            "ManagedIdentity" => IdentityType.UserAssignedManagedIdentity,
+            "Application" => IdentityType.ServicePrincipal,
+            _ => IdentityType.ServicePrincipal
         };
     }
 
