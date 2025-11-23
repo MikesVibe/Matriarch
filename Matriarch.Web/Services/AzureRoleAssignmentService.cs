@@ -73,16 +73,19 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
 
             _logger.LogInformation("Resolved identity: {Name} ({ObjectId})", resolvedIdentity.Name, resolvedIdentity.ObjectId);
 
-            // Step 2: Fetch role assignments specifically for this principal and their groups
-            var principalIds = new List<string> { resolvedIdentity.ObjectId };
+            // Step 2: Get direct group memberships
+            var directGroupIds = await GetGroupMembershipsAsync(resolvedIdentity.ObjectId);
             
-            // Get group memberships first
-            var groupIds = await GetGroupMembershipsAsync(resolvedIdentity.ObjectId);
-            principalIds.AddRange(groupIds);
+            // Step 3: Fetch all groups (direct and indirect) before fetching role assignments
+            var allGroupIds = await GetAllGroupsAsync(directGroupIds);
+            
+            _logger.LogInformation("Found {DirectCount} direct groups and {TotalCount} total groups (including indirect)", 
+                directGroupIds.Count, allGroupIds.Count);
 
-            _logger.LogInformation("Fetching role assignments for principal and {GroupCount} groups", groupIds.Count);
-
-            // Step 3: Fetch role assignments only for these specific principals
+            // Step 4: Fetch role assignments for principal and ALL groups (direct and indirect)
+            var principalIds = new List<string> { resolvedIdentity.ObjectId };
+            principalIds.AddRange(allGroupIds);
+            
             var roleAssignments = await FetchRoleAssignmentsForPrincipalsAsync(principalIds);
             
             // Filter direct role assignments (only for the user/service principal)
@@ -97,10 +100,10 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                 })
                 .ToList();
 
-            // Step 4: Build security group hierarchy with role assignments
-            var securityGroups = await BuildSecurityGroupsAsync(groupIds, roleAssignments);
+            // Step 5: Build security group hierarchy with role assignments
+            var securityGroups = await BuildSecurityGroupsAsync(directGroupIds, roleAssignments);
 
-            // Step 5: Fetch API permissions if this is a service principal
+            // Step 6: Fetch API permissions if this is a service principal
             var apiPermissions = await GetApiPermissionsAsync(resolvedIdentity.ObjectId);
 
             return new SharedIdentityResult
@@ -308,6 +311,56 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
         }
 
         return groupIds;
+    }
+
+    private async Task<List<string>> GetAllGroupsAsync(List<string> directGroupIds)
+    {
+        var allGroupIds = new HashSet<string>(directGroupIds);
+        var groupsToProcess = new Queue<string>(directGroupIds);
+        var processedGroups = new HashSet<string>();
+
+        while (groupsToProcess.Count > 0)
+        {
+            var currentGroupId = groupsToProcess.Dequeue();
+            
+            // Skip if already processed (circular reference protection)
+            if (processedGroups.Contains(currentGroupId))
+            {
+                continue;
+            }
+            
+            processedGroups.Add(currentGroupId);
+
+            try
+            {
+                // Get parent groups (groups this group is a member of)
+                var memberOfPage = await _graphClient.Groups[currentGroupId].MemberOf.GetAsync(config =>
+                {
+                    config.QueryParameters.Top = MaxGraphPageSize;
+                });
+
+                if (memberOfPage?.Value != null)
+                {
+                    foreach (var directoryObject in memberOfPage.Value)
+                    {
+                        if (directoryObject is Group parentGroup && parentGroup.SecurityEnabled == true && !string.IsNullOrEmpty(parentGroup.Id))
+                        {
+                            if (allGroupIds.Add(parentGroup.Id))
+                            {
+                                // New group found, add to queue for processing
+                                groupsToProcess.Enqueue(parentGroup.Id);
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error fetching parent groups for {GroupId}", currentGroupId);
+            }
+        }
+
+        return allGroupIds.ToList();
     }
 
     private async Task<List<AzureRoleAssignmentDto>> FetchRoleAssignmentsForPrincipalsAsync(List<string> principalIds)
