@@ -392,7 +392,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Could not fetch App Registration for AppId: {AppId}", appId);
+            _logger.LogWarning(ex, "Could not fetch App Registration for AppId: {AppId}", appId);
         }
 
         return null;
