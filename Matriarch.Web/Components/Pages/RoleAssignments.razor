@@ -79,10 +79,6 @@
                         <dt class="col-sm-3">Identity Type:</dt>
                         <dd class="col-sm-9">
                             <span class="badge bg-primary">@GetIdentityTypeDisplay(result.Identity.Type)</span>
-                            @if (!string.IsNullOrEmpty(result.Identity.ServicePrincipalType))
-                            {
-                                <span class="ms-2 text-muted">(@result.Identity.ServicePrincipalType)</span>
-                            }
                         </dd>
                         
                         <dt class="col-sm-3">Name:</dt>
