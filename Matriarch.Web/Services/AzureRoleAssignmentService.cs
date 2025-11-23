@@ -1,9 +1,6 @@
 using Azure.Core;
 using Azure.Identity;
 using Microsoft.Extensions.Logging;
-using Microsoft.Graph.Beta;
-using Microsoft.Graph.Beta.Models;
-using Microsoft.Kiota.Abstractions;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -22,13 +19,10 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
     private readonly ILogger<AzureRoleAssignmentService> _logger;
     private readonly IIdentityService _identityService;
     private readonly IGroupManagementService _groupManagementService;
-    private readonly GraphServiceClient _graphClient;
+    private readonly IApiPermissionsService _apiPermissionsService;
     private readonly TokenCredential _credential;
     private readonly HttpClient _httpClient;
     private const string ResourceGraphApiEndpoint = "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01";
-    // Maximum page size supported by Microsoft Graph API
-    private const int MaxGraphPageSize = 999;
-    private const string ApplicationPermissionType = "Application";
     
     private const string _roleAssignmentsQuery = @"
         authorizationresources
@@ -48,20 +42,19 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
         AppSettings settings, 
         ILogger<AzureRoleAssignmentService> logger,
         IIdentityService identityService,
-        IGroupManagementService groupManagementService)
+        IGroupManagementService groupManagementService,
+        IApiPermissionsService apiPermissionsService)
     {
         _logger = logger;
         _identityService = identityService;
         _groupManagementService = groupManagementService;
+        _apiPermissionsService = apiPermissionsService;
 
         // Use ClientSecretCredential for authentication
         _credential = new ClientSecretCredential(
             settings.Azure.TenantId,
             settings.Azure.ClientId,
             settings.Azure.ClientSecret);
-
-        // Initialize Graph client for Entra ID operations
-        _graphClient = new GraphServiceClient(_credential);
 
         // Initialize HttpClient for direct API calls
         _httpClient = new HttpClient();
@@ -116,7 +109,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             var securityIndirectGroups = _groupManagementService.BuildSecurityGroupsWithPreFetchedData(indrectGroupIds, groupInfoMap, roleAssignments);
 
             // Step 6: Fetch API permissions if this is a service principal
-            var apiPermissions = await GetApiPermissionsAsync(resolvedIdentity.ObjectId);
+            var apiPermissions = await _apiPermissionsService.GetApiPermissionsAsync(resolvedIdentity.ObjectId);
 
             return new SharedIdentityResult
             {
@@ -138,6 +131,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
     {
         return await _identityService.SearchIdentitiesAsync(searchInput);
     }
+
     private async Task<List<AzureRoleAssignmentDto>> FetchRoleAssignmentsForPrincipalsAsync(List<string> principalIds)
     {
         if (!principalIds.Any())
@@ -267,72 +261,5 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             return skipTokenElement.GetString();
         }
         return null;
-    }
-
-    private async Task<List<SharedApiPermission>> GetApiPermissionsAsync(string principalId)
-    {
-        var apiPermissions = new List<SharedApiPermission>();
-
-        try
-        {
-            // Try to get app role assignments for a service principal
-            var appRoleAssignments = await _graphClient.ServicePrincipals[principalId]
-                .AppRoleAssignments
-                .GetAsync(config =>
-                {
-                    config.QueryParameters.Top = MaxGraphPageSize;
-                });
-
-            if (appRoleAssignments?.Value != null)
-            {
-                foreach (var assignment in appRoleAssignments.Value)
-                {
-                    if (assignment.ResourceId == null || assignment.AppRoleId == null)
-                    {
-                        continue;
-                    }
-
-                    // Get the resource service principal to find the app role details
-                    try
-                    {
-                        var resourceSp = await _graphClient.ServicePrincipals[assignment.ResourceId.ToString()].GetAsync();
-                        
-                        if (resourceSp?.AppRoles != null)
-                        {
-                            var appRole = resourceSp.AppRoles.FirstOrDefault(r => r.Id == assignment.AppRoleId);
-                            
-                            apiPermissions.Add(new SharedApiPermission
-                            {
-                                Id = assignment.Id ?? string.Empty,
-                                ResourceDisplayName = resourceSp.DisplayName ?? assignment.ResourceDisplayName ?? string.Empty,
-                                ResourceId = assignment.ResourceId.ToString() ?? string.Empty,
-                                PermissionType = ApplicationPermissionType,
-                                PermissionValue = appRole?.Value ?? string.Empty
-                            });
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogDebug(ex, "Could not fetch resource details for app role assignment");
-                        
-                        // Add with limited information
-                        apiPermissions.Add(new SharedApiPermission
-                        {
-                            Id = assignment.Id ?? string.Empty,
-                            ResourceDisplayName = assignment.ResourceDisplayName ?? string.Empty,
-                            ResourceId = assignment.ResourceId.ToString() ?? string.Empty,
-                            PermissionType = ApplicationPermissionType,
-                            PermissionValue = string.Empty
-                        });
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Could not fetch API permissions (identity may not be a service principal)");
-        }
-
-        return apiPermissions;
     }
 }

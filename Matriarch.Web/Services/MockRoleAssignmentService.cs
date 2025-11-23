@@ -10,11 +10,14 @@ public interface IRoleAssignmentService
 
 public class MockRoleAssignmentService : IRoleAssignmentService
 {
+    private readonly IApiPermissionsService _apiPermissionsService;
     private readonly List<RoleAssignment> _mockRoleAssignments;
     private readonly List<SecurityGroup> _mockSecurityGroups;
     
-    public MockRoleAssignmentService()
+    public MockRoleAssignmentService(IApiPermissionsService apiPermissionsService)
     {
+        _apiPermissionsService = apiPermissionsService;
+
         // Create mock parent security groups
         var parentGroup1 = new SecurityGroup
         {
@@ -89,7 +92,7 @@ public class MockRoleAssignmentService : IRoleAssignmentService
         };
     }
 
-    public Task<IdentityRoleAssignmentResult> GetRoleAssignmentsAsync(string identityInput)
+    public async Task<IdentityRoleAssignmentResult> GetRoleAssignmentsAsync(string identityInput)
     {
         // For demo purposes, return mock data for any input
         // In a real implementation, this would query Azure or Neo4j
@@ -106,26 +109,8 @@ public class MockRoleAssignmentService : IRoleAssignmentService
         // Simulate that this user is member of the first two security groups
         var userSecurityGroups = _mockSecurityGroups.Take(2).ToList();
 
-        // Mock API permissions
-        var apiPermissions = new List<ApiPermission>
-        {
-            new ApiPermission
-            {
-                Id = "api-1",
-                ResourceDisplayName = "Microsoft Graph",
-                ResourceId = "00000003-0000-0000-c000-000000000000",
-                PermissionType = "Application",
-                PermissionValue = "User.Read.All"
-            },
-            new ApiPermission
-            {
-                Id = "api-2",
-                ResourceDisplayName = "Microsoft Graph",
-                ResourceId = "00000003-0000-0000-c000-000000000000",
-                PermissionType = "Application",
-                PermissionValue = "Directory.Read.All"
-            }
-        };
+        // Get mock API permissions from the service
+        var apiPermissions = await _apiPermissionsService.GetApiPermissionsAsync(identity.ObjectId);
 
         var result = new IdentityRoleAssignmentResult
         {
@@ -135,7 +120,7 @@ public class MockRoleAssignmentService : IRoleAssignmentService
             ApiPermissions = apiPermissions
         };
 
-        return Task.FromResult(result);
+        return result;
     }
 
     public Task<IdentitySearchResult> SearchIdentitiesAsync(string searchInput)
