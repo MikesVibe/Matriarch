@@ -183,54 +183,111 @@ public class IdentityService : IIdentityService
         // Auto-detect input type
         if (Guid.TryParse(identityInput, out _))
         {
-            // It's a GUID - could be ObjectId, ApplicationId, or GroupId
-            // Try as User first
+            // It's a GUID - could be ObjectId or ApplicationId
+            // First, try to resolve by ObjectId using DirectoryObjects.GetByIds for efficiency
             try
             {
-                var user = await _graphClient.Users[identityInput].GetAsync();
-                if (user != null)
+                var getByIdsRequest = new Microsoft.Graph.Beta.DirectoryObjects.GetByIds.GetByIdsPostRequestBody
                 {
-                    return new SharedIdentity
+                    Ids = new List<string> { identityInput },
+                    Types = new List<string> { "user", "servicePrincipal", "application", "group" }
+                };
+
+                var response = await _graphClient.DirectoryObjects.GetByIds.PostAsGetByIdsPostResponseAsync(getByIdsRequest);
+                var directoryObjects = response?.Value;
+
+                if (directoryObjects != null && directoryObjects.Count > 0)
+                {
+                    var directoryObject = directoryObjects[0];
+                    
+                    // Check the type and cast appropriately
+                    if (directoryObject is User user)
                     {
-                        ObjectId = user.Id ?? identityInput,
-                        ApplicationId = "",
-                        Email = user.Mail ?? user.UserPrincipalName ?? "",
-                        Name = user.DisplayName ?? "",
-                        Type = IdentityType.User
-                    };
+                        _logger.LogInformation("Found User by ObjectId: {ObjectId}", identityInput);
+                        return new SharedIdentity
+                        {
+                            ObjectId = user.Id ?? identityInput,
+                            ApplicationId = "",
+                            Email = user.Mail ?? user.UserPrincipalName ?? "",
+                            Name = user.DisplayName ?? "",
+                            Type = IdentityType.User
+                        };
+                    }
+                    else if (directoryObject is ServicePrincipal sp)
+                    {
+                        _logger.LogInformation("Found Service Principal by ObjectId: {ObjectId}", identityInput);
+                        var identityType = DetermineServicePrincipalType(sp.ServicePrincipalType);
+                        var appRegistrationId = await GetAppRegistrationObjectIdAsync(sp.AppId);
+                        return new SharedIdentity
+                        {
+                            ObjectId = sp.Id ?? identityInput,
+                            ApplicationId = sp.AppId ?? "",
+                            Email = "",
+                            Name = sp.DisplayName ?? "",
+                            Type = identityType,
+                            ServicePrincipalType = sp.ServicePrincipalType,
+                            AppRegistrationId = appRegistrationId
+                        };
+                    }
+                    else if (directoryObject is Microsoft.Graph.Beta.Models.Application app)
+                    {
+                        _logger.LogInformation("Found App Registration by ObjectId: {ObjectId}, looking for Enterprise Application", identityInput);
+                        
+                        // Find the corresponding Service Principal (Enterprise Application) using the AppId
+                        if (!string.IsNullOrEmpty(app.AppId))
+                        {
+                            var escapedAppId = EscapeODataFilterValue(app.AppId);
+                            var sps = await _graphClient.ServicePrincipals.GetAsync(config =>
+                            {
+                                config.QueryParameters.Filter = $"appId eq '{escapedAppId}'";
+                                config.QueryParameters.Top = 1;
+                            });
+
+                            var servicePrincipal = sps?.Value?.FirstOrDefault();
+                            if (servicePrincipal != null)
+                            {
+                                var identityType = DetermineServicePrincipalType(servicePrincipal.ServicePrincipalType);
+                                return new SharedIdentity
+                                {
+                                    ObjectId = servicePrincipal.Id ?? "",
+                                    ApplicationId = servicePrincipal.AppId ?? app.AppId,
+                                    Email = "",
+                                    Name = servicePrincipal.DisplayName ?? app.DisplayName ?? "",
+                                    Type = identityType,
+                                    ServicePrincipalType = servicePrincipal.ServicePrincipalType,
+                                    AppRegistrationId = app.Id
+                                };
+                            }
+                            else
+                            {
+                                _logger.LogWarning("Found App Registration (ObjectId: {ObjectId}, AppId: {AppId}) but no corresponding Enterprise Application exists in this tenant", app.Id, app.AppId);
+                            }
+                        }
+                    }
+                    else if (directoryObject is Group group)
+                    {
+                        if (group.SecurityEnabled == true)
+                        {
+                            _logger.LogInformation("Found Security Group by ObjectId: {ObjectId}", identityInput);
+                            return new SharedIdentity
+                            {
+                                ObjectId = group.Id ?? identityInput,
+                                ApplicationId = "",
+                                Email = "",
+                                Name = group.DisplayName ?? "",
+                                Type = IdentityType.Group
+                            };
+                        }
+                    }
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Not found as user, trying as service principal");
+                _logger.LogDebug(ex, "Not found by ObjectId using GetByIds, trying as ApplicationId");
             }
 
-            // Try as Service Principal (by ObjectId)
-            try
-            {
-                var sp = await _graphClient.ServicePrincipals[identityInput].GetAsync();
-                if (sp != null)
-                {
-                    var identityType = DetermineServicePrincipalType(sp.ServicePrincipalType);
-                    var appRegistrationId = await GetAppRegistrationObjectIdAsync(sp.AppId);
-                    return new SharedIdentity
-                    {
-                        ObjectId = sp.Id ?? identityInput,
-                        ApplicationId = sp.AppId ?? "",
-                        Email = "",
-                        Name = sp.DisplayName ?? "",
-                        Type = identityType,
-                        ServicePrincipalType = sp.ServicePrincipalType,
-                        AppRegistrationId = appRegistrationId
-                    };
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Not found as service principal by ObjectId, trying as ApplicationId");
-            }
-
-            // Try as Application ID (find the App Registration and its Enterprise Application)
+            // If not found by ObjectId, try as ApplicationId (AppId)
+            // Note: GetByIds doesn't support ApplicationId, so we need a separate query
             try
             {
                 var escapedInput = EscapeODataFilterValue(identityInput);
@@ -260,71 +317,7 @@ public class IdentityService : IIdentityService
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Not found as application by ApplicationId, trying as App Registration by ObjectId");
-            }
-
-            // Try as App Registration (by ObjectId)
-            try
-            {
-                var app = await _graphClient.Applications[identityInput].GetAsync();
-                if (app != null && !string.IsNullOrEmpty(app.AppId))
-                {
-                    _logger.LogInformation("Found App Registration by ObjectId: {ObjectId}, looking for Enterprise Application", identityInput);
-                    
-                    // Find the corresponding Service Principal (Enterprise Application) using the AppId
-                    var escapedAppId = EscapeODataFilterValue(app.AppId);
-                    var sps = await _graphClient.ServicePrincipals.GetAsync(config =>
-                    {
-                        config.QueryParameters.Filter = $"appId eq '{escapedAppId}'";
-                        config.QueryParameters.Top = 1;
-                    });
-
-                    var sp = sps?.Value?.FirstOrDefault();
-                    if (sp != null)
-                    {
-                        var identityType = DetermineServicePrincipalType(sp.ServicePrincipalType);
-                        return new SharedIdentity
-                        {
-                            ObjectId = sp.Id ?? "",
-                            ApplicationId = sp.AppId ?? app.AppId,
-                            Email = "",
-                            Name = sp.DisplayName ?? app.DisplayName ?? "",
-                            Type = identityType,
-                            ServicePrincipalType = sp.ServicePrincipalType,
-                            AppRegistrationId = app.Id // Use the App Registration ObjectId we already have
-                        };
-                    }
-                    else
-                    {
-                        _logger.LogWarning("Found App Registration (ObjectId: {ObjectId}, AppId: {AppId}) but no corresponding Enterprise Application exists in this tenant", app.Id, app.AppId);
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogDebug(ex, "Not found as App Registration by ObjectId, trying as group");
-            }
-
-            // Try as Group (by ObjectId)
-            try
-            {
-                var group = await _graphClient.Groups[identityInput].GetAsync();
-                if (group != null && group.SecurityEnabled == true)
-                {
-                    _logger.LogInformation("Found Security Group by ID: {GroupId}", identityInput);
-                    return new SharedIdentity
-                    {
-                        ObjectId = group.Id ?? identityInput,
-                        ApplicationId = "",
-                        Email = "",
-                        Name = group.DisplayName ?? "",
-                        Type = IdentityType.Group
-                    };
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Identity not found by GUID");
+                _logger.LogWarning(ex, "Identity not found by GUID (tried both ObjectId and ApplicationId)");
             }
         }
         else if (identityInput.Contains("@"))
