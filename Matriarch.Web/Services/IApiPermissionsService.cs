@@ -5,12 +5,14 @@ namespace Matriarch.Web.Services;
 public interface IApiPermissionsService
 {
     /// <summary>
-    /// Gets API permissions (app role assignments) for an identity.
+    /// Gets API permissions for an identity.
     /// </summary>
     /// <param name="identity">The identity to fetch API permissions for</param>
     /// <returns>
-    /// List of API permissions for service principals and managed identities.
-    /// Returns an empty list for users and groups (as they don't have API permissions).
+    /// List of API permissions:
+    /// - For service principals and managed identities: Application permissions (app role assignments)
+    /// - For users: Delegated permissions (OAuth2 grants) and user role assignments
+    /// - For groups: Returns an empty list (groups don't have API permissions)
     /// </returns>
     Task<List<ApiPermission>> GetApiPermissionsAsync(Identity identity);
 }
