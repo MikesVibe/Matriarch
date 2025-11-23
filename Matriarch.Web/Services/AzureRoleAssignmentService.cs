@@ -12,6 +12,7 @@ using SharedIdentity = Matriarch.Shared.Models.Identity;
 using SharedRoleAssignment = Matriarch.Shared.Models.RoleAssignment;
 using SharedSecurityGroup = Matriarch.Shared.Models.SecurityGroup;
 using SharedIdentityResult = Matriarch.Shared.Models.IdentityRoleAssignmentResult;
+using SharedApiPermission = Matriarch.Shared.Models.ApiPermission;
 
 namespace Matriarch.Web.Services;
 
@@ -24,6 +25,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
     private const string ResourceGraphApiEndpoint = "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01";
     // Maximum page size supported by Microsoft Graph API
     private const int MaxGraphPageSize = 999;
+    private const string ApplicationPermissionType = "Application";
     
     private const string _roleAssignmentsQuery = @"
         authorizationresources
@@ -71,16 +73,19 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
 
             _logger.LogInformation("Resolved identity: {Name} ({ObjectId})", resolvedIdentity.Name, resolvedIdentity.ObjectId);
 
-            // Step 2: Fetch role assignments specifically for this principal and their groups
-            var principalIds = new List<string> { resolvedIdentity.ObjectId };
+            // Step 2: Get direct group memberships
+            var directGroupIds = await GetGroupMembershipsAsync(resolvedIdentity.ObjectId);
             
-            // Get group memberships first
-            var groupIds = await GetGroupMembershipsAsync(resolvedIdentity.ObjectId);
-            principalIds.AddRange(groupIds);
+            // Step 3: Fetch all groups (direct and indirect) before fetching role assignments
+            var (allGroupIds, groupInfoMap) = await GetAllGroupsAsync(directGroupIds);
+            
+            _logger.LogInformation("Found {DirectCount} direct groups and {TotalCount} total groups (including indirect)", 
+                directGroupIds.Count, allGroupIds.Count);
 
-            _logger.LogInformation("Fetching role assignments for principal and {GroupCount} groups", groupIds.Count);
-
-            // Step 3: Fetch role assignments only for these specific principals
+            // Step 4: Fetch role assignments for principal and ALL groups (direct and indirect)
+            var principalIds = new List<string> { resolvedIdentity.ObjectId };
+            principalIds.AddRange(allGroupIds);
+            
             var roleAssignments = await FetchRoleAssignmentsForPrincipalsAsync(principalIds);
             
             // Filter direct role assignments (only for the user/service principal)
@@ -95,14 +100,18 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                 })
                 .ToList();
 
-            // Step 4: Build security group hierarchy with role assignments
-            var securityGroups = await BuildSecurityGroupsAsync(groupIds, roleAssignments);
+            // Step 5: Build security group hierarchy with role assignments using pre-fetched group info
+            var securityGroups = BuildSecurityGroupsWithPreFetchedData(directGroupIds, groupInfoMap, roleAssignments);
+
+            // Step 6: Fetch API permissions if this is a service principal
+            var apiPermissions = await GetApiPermissionsAsync(resolvedIdentity.ObjectId);
 
             return new SharedIdentityResult
             {
                 Identity = resolvedIdentity,
                 DirectRoleAssignments = directRoleAssignments,
-                SecurityGroups = securityGroups
+                SecurityGroups = securityGroups,
+                ApiPermissions = apiPermissions
             };
         }
         catch (Exception ex)
@@ -119,7 +128,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
         // Auto-detect input type
         if (Guid.TryParse(identityInput, out _))
         {
-            // It's a GUID - could be ObjectId or ApplicationId
+            // It's a GUID - could be ObjectId, ApplicationId, or GroupId
             // Try as User first
             try
             {
@@ -131,7 +140,8 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                         ObjectId = user.Id ?? identityInput,
                         ApplicationId = "",
                         Email = user.Mail ?? user.UserPrincipalName ?? "",
-                        Name = user.DisplayName ?? ""
+                        Name = user.DisplayName ?? "",
+                        Type = Matriarch.Shared.Models.IdentityType.User
                     };
                 }
             }
@@ -140,24 +150,82 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                 _logger.LogDebug(ex, "Not found as user, trying as service principal");
             }
 
-            // Try as Service Principal
+            // Try as Service Principal (by ObjectId)
             try
             {
                 var sp = await _graphClient.ServicePrincipals[identityInput].GetAsync();
                 if (sp != null)
                 {
+                    var identityType = DetermineServicePrincipalType(sp.ServicePrincipalType);
                     return new SharedIdentity
                     {
                         ObjectId = sp.Id ?? identityInput,
                         ApplicationId = sp.AppId ?? "",
                         Email = "",
-                        Name = sp.DisplayName ?? ""
+                        Name = sp.DisplayName ?? "",
+                        Type = identityType,
+                        ServicePrincipalType = sp.ServicePrincipalType,
+                        AppRegistrationId = sp.AppOwnerOrganizationId?.ToString()
                     };
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Identity not found by ObjectId");
+                _logger.LogDebug(ex, "Not found as service principal by ObjectId, trying as ApplicationId");
+            }
+
+            // Try as Application ID (find the App Registration and its Enterprise Application)
+            try
+            {
+                var escapedInput = EscapeODataFilterValue(identityInput);
+                var sps = await _graphClient.ServicePrincipals.GetAsync(config =>
+                {
+                    config.QueryParameters.Filter = $"appId eq '{escapedInput}'";
+                    config.QueryParameters.Top = 1;
+                });
+
+                var sp = sps?.Value?.FirstOrDefault();
+                if (sp != null)
+                {
+                    _logger.LogInformation("Found Enterprise Application by Application ID: {AppId}", identityInput);
+                    var identityType = DetermineServicePrincipalType(sp.ServicePrincipalType);
+                    return new SharedIdentity
+                    {
+                        ObjectId = sp.Id ?? "",
+                        ApplicationId = sp.AppId ?? identityInput,
+                        Email = "",
+                        Name = sp.DisplayName ?? "",
+                        Type = identityType,
+                        ServicePrincipalType = sp.ServicePrincipalType,
+                        AppRegistrationId = sp.AppOwnerOrganizationId?.ToString()
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Not found as application by ApplicationId, trying as group");
+            }
+
+            // Try as Group (by ObjectId)
+            try
+            {
+                var group = await _graphClient.Groups[identityInput].GetAsync();
+                if (group != null && group.SecurityEnabled == true)
+                {
+                    _logger.LogInformation("Found Security Group by ID: {GroupId}", identityInput);
+                    return new SharedIdentity
+                    {
+                        ObjectId = group.Id ?? identityInput,
+                        ApplicationId = "",
+                        Email = "",
+                        Name = group.DisplayName ?? "",
+                        Type = Matriarch.Shared.Models.IdentityType.Group
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Identity not found by GUID");
             }
         }
         else if (identityInput.Contains("@"))
@@ -180,7 +248,8 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                         ObjectId = user.Id ?? "",
                         ApplicationId = "",
                         Email = user.Mail ?? user.UserPrincipalName ?? identityInput,
-                        Name = user.DisplayName ?? ""
+                        Name = user.DisplayName ?? "",
+                        Type = Matriarch.Shared.Models.IdentityType.User
                     };
                 }
             }
@@ -209,7 +278,8 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                         ObjectId = user.Id ?? "",
                         ApplicationId = "",
                         Email = user.Mail ?? user.UserPrincipalName ?? "",
-                        Name = user.DisplayName ?? identityInput
+                        Name = user.DisplayName ?? identityInput,
+                        Type = Matriarch.Shared.Models.IdentityType.User
                     };
                 }
             }
@@ -231,22 +301,66 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                 var sp = sps?.Value?.FirstOrDefault();
                 if (sp != null)
                 {
+                    var identityType = DetermineServicePrincipalType(sp.ServicePrincipalType);
                     return new SharedIdentity
                     {
                         ObjectId = sp.Id ?? "",
                         ApplicationId = sp.AppId ?? "",
                         Email = "",
-                        Name = sp.DisplayName ?? identityInput
+                        Name = sp.DisplayName ?? identityInput,
+                        Type = identityType,
+                        ServicePrincipalType = sp.ServicePrincipalType,
+                        AppRegistrationId = sp.AppOwnerOrganizationId?.ToString()
                     };
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Service principal not found by name");
+                _logger.LogDebug(ex, "Service principal not found by name, trying group");
+            }
+
+            // Try as Group by display name
+            try
+            {
+                var escapedInput = EscapeODataFilterValue(identityInput);
+                var groups = await _graphClient.Groups.GetAsync(config =>
+                {
+                    config.QueryParameters.Filter = $"startswith(displayName, '{escapedInput}') and securityEnabled eq true";
+                    config.QueryParameters.Top = 1;
+                });
+
+                var group = groups?.Value?.FirstOrDefault();
+                if (group != null)
+                {
+                    _logger.LogInformation("Found Security Group by name: {GroupName}", identityInput);
+                    return new SharedIdentity
+                    {
+                        ObjectId = group.Id ?? "",
+                        ApplicationId = "",
+                        Email = "",
+                        Name = group.DisplayName ?? identityInput,
+                        Type = Matriarch.Shared.Models.IdentityType.Group
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Group not found by name");
             }
         }
 
+        _logger.LogWarning("Identity could not be resolved from input: {Input}", identityInput);
         return null;
+    }
+
+    private static Matriarch.Shared.Models.IdentityType DetermineServicePrincipalType(string? servicePrincipalType)
+    {
+        return servicePrincipalType switch
+        {
+            "ManagedIdentity" => Matriarch.Shared.Models.IdentityType.UserAssignedManagedIdentity,
+            "Application" => Matriarch.Shared.Models.IdentityType.ServicePrincipal,
+            _ => Matriarch.Shared.Models.IdentityType.ServicePrincipal
+        };
     }
 
     private async Task<List<string>> GetGroupMembershipsAsync(string principalId)
@@ -297,11 +411,98 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             }
             catch (Exception spEx)
             {
-                _logger.LogWarning(spEx, "Could not fetch group memberships");
+                _logger.LogDebug(spEx, "Not a service principal, trying as group");
+                
+                try
+                {
+                    // Try as group - if the identity is a group, return it as its own "direct membership"
+                    var group = await _graphClient.Groups[principalId].GetAsync();
+                    if (group != null && group.SecurityEnabled == true)
+                    {
+                        // For a group, we treat it as being "member" of itself for role assignment purposes
+                        groupIds.Add(principalId);
+                        _logger.LogInformation("Identity is a group, will fetch its role assignments");
+                    }
+                }
+                catch (Exception groupEx)
+                {
+                    _logger.LogWarning(groupEx, "Could not fetch group memberships for any entity type");
+                }
             }
         }
 
         return groupIds;
+    }
+
+    private async Task<(List<string> allGroupIds, Dictionary<string, GroupInfo> groupInfoMap)> GetAllGroupsAsync(List<string> directGroupIds)
+    {
+        var allGroupIds = new HashSet<string>(directGroupIds);
+        var groupsToProcess = new Queue<string>(directGroupIds);
+        var processedGroups = new HashSet<string>();
+        var groupInfoMap = new Dictionary<string, GroupInfo>();
+
+        while (groupsToProcess.Count > 0)
+        {
+            var currentGroupId = groupsToProcess.Dequeue();
+            
+            // Skip if already processed (circular reference protection)
+            if (processedGroups.Contains(currentGroupId))
+            {
+                continue;
+            }
+            
+            processedGroups.Add(currentGroupId);
+
+            try
+            {
+                // Get group details and parent groups in a single operation
+                var group = await _graphClient.Groups[currentGroupId].GetAsync();
+                var memberOfPage = await _graphClient.Groups[currentGroupId].MemberOf.GetAsync(config =>
+                {
+                    config.QueryParameters.Top = MaxGraphPageSize;
+                });
+
+                var parentGroupIds = new List<string>();
+                if (memberOfPage?.Value != null)
+                {
+                    foreach (var directoryObject in memberOfPage.Value)
+                    {
+                        if (directoryObject is Group parentGroup && parentGroup.SecurityEnabled == true && !string.IsNullOrEmpty(parentGroup.Id))
+                        {
+                            parentGroupIds.Add(parentGroup.Id);
+                            if (allGroupIds.Add(parentGroup.Id))
+                            {
+                                // New group found, add to queue for processing
+                                groupsToProcess.Enqueue(parentGroup.Id);
+                            }
+                        }
+                    }
+                }
+
+                // Store group information
+                groupInfoMap[currentGroupId] = new GroupInfo
+                {
+                    Id = group?.Id ?? currentGroupId,
+                    DisplayName = group?.DisplayName ?? string.Empty,
+                    Description = group?.Description ?? string.Empty,
+                    ParentGroupIds = parentGroupIds
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error fetching parent groups for {GroupId}", currentGroupId);
+            }
+        }
+
+        return (allGroupIds.ToList(), groupInfoMap);
+    }
+
+    private class GroupInfo
+    {
+        public string Id { get; set; } = string.Empty;
+        public string DisplayName { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public List<string> ParentGroupIds { get; set; } = new();
     }
 
     private async Task<List<AzureRoleAssignmentDto>> FetchRoleAssignmentsForPrincipalsAsync(List<string> principalIds)
@@ -357,15 +558,16 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
         return roleAssignments;
     }
 
-    private async Task<List<SharedSecurityGroup>> BuildSecurityGroupsAsync(
-        List<string> groupIds, 
+    private List<SharedSecurityGroup> BuildSecurityGroupsWithPreFetchedData(
+        List<string> groupIds,
+        Dictionary<string, GroupInfo> groupInfoMap,
         List<AzureRoleAssignmentDto> roleAssignments)
     {
         var securityGroups = new List<SharedSecurityGroup>();
 
         foreach (var groupId in groupIds)
         {
-            var group = await BuildSecurityGroupAsync(groupId, roleAssignments, new HashSet<string>());
+            var group = BuildSecurityGroupWithPreFetchedData(groupId, groupInfoMap, roleAssignments, new HashSet<string>());
             if (group != null)
             {
                 securityGroups.Add(group);
@@ -375,8 +577,9 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
         return securityGroups;
     }
 
-    private async Task<SharedSecurityGroup?> BuildSecurityGroupAsync(
+    private SharedSecurityGroup? BuildSecurityGroupWithPreFetchedData(
         string groupId,
+        Dictionary<string, GroupInfo> groupInfoMap,
         List<AzureRoleAssignmentDto> allRoleAssignments,
         HashSet<string> currentPath)
     {
@@ -386,19 +589,18 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             return null;
         }
 
+        // Check if we have info for this group
+        if (!groupInfoMap.TryGetValue(groupId, out var groupInfo))
+        {
+            _logger.LogWarning("Group info not found for {GroupId}", groupId);
+            return null;
+        }
+
         // Add to current path for circular reference detection
         currentPath.Add(groupId);
 
         try
         {
-            // Get group details
-            var group = await _graphClient.Groups[groupId].GetAsync();
-            
-            if (group == null)
-            {
-                return null;
-            }
-
             // Get role assignments for this group
             var groupRoleAssignments = allRoleAssignments
                 .Where(ra => ra.PrincipalId == groupId)
@@ -407,34 +609,20 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                     Id = ra.Id,
                     RoleName = ra.RoleName,
                     Scope = ra.Scope,
-                    AssignedTo = group.DisplayName ?? groupId
+                    AssignedTo = groupInfo.DisplayName
                 })
                 .ToList();
 
-            // Get parent groups (groups this group is a member of)
+            // Build parent groups using pre-fetched data
             var parentGroups = new List<SharedSecurityGroup>();
-            var memberOfPage = await _graphClient.Groups[groupId].MemberOf.GetAsync(config =>
+            foreach (var parentGroupId in groupInfo.ParentGroupIds)
             {
-                config.QueryParameters.Top = MaxGraphPageSize;
-            });
-
-            if (memberOfPage?.Value != null)
-            {
-                foreach (var directoryObject in memberOfPage.Value)
+                // Create a new path copy for each parent branch to properly detect circular references
+                var newPath = new HashSet<string>(currentPath);
+                var securityParentGroup = BuildSecurityGroupWithPreFetchedData(parentGroupId, groupInfoMap, allRoleAssignments, newPath);
+                if (securityParentGroup != null)
                 {
-                    if (directoryObject is Group parentGroup && parentGroup.SecurityEnabled == true)
-                    {
-                        if (!string.IsNullOrEmpty(parentGroup.Id))
-                        {
-                            // Create a new path copy for each parent branch to properly detect circular references
-                            var newPath = new HashSet<string>(currentPath);
-                            var securityParentGroup = await BuildSecurityGroupAsync(parentGroup.Id, allRoleAssignments, newPath);
-                            if (securityParentGroup != null)
-                            {
-                                parentGroups.Add(securityParentGroup);
-                            }
-                        }
-                    }
+                    parentGroups.Add(securityParentGroup);
                 }
             }
 
@@ -443,9 +631,9 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
 
             return new SharedSecurityGroup
             {
-                Id = group.Id ?? groupId,
-                DisplayName = group.DisplayName ?? string.Empty,
-                Description = group.Description ?? string.Empty,
+                Id = groupInfo.Id,
+                DisplayName = groupInfo.DisplayName,
+                Description = groupInfo.Description,
                 RoleAssignments = groupRoleAssignments,
                 ParentGroups = parentGroups
             };
@@ -535,6 +723,73 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             return skipTokenElement.GetString();
         }
         return null;
+    }
+
+    private async Task<List<SharedApiPermission>> GetApiPermissionsAsync(string principalId)
+    {
+        var apiPermissions = new List<SharedApiPermission>();
+
+        try
+        {
+            // Try to get app role assignments for a service principal
+            var appRoleAssignments = await _graphClient.ServicePrincipals[principalId]
+                .AppRoleAssignments
+                .GetAsync(config =>
+                {
+                    config.QueryParameters.Top = MaxGraphPageSize;
+                });
+
+            if (appRoleAssignments?.Value != null)
+            {
+                foreach (var assignment in appRoleAssignments.Value)
+                {
+                    if (assignment.ResourceId == null || assignment.AppRoleId == null)
+                    {
+                        continue;
+                    }
+
+                    // Get the resource service principal to find the app role details
+                    try
+                    {
+                        var resourceSp = await _graphClient.ServicePrincipals[assignment.ResourceId.ToString()].GetAsync();
+                        
+                        if (resourceSp?.AppRoles != null)
+                        {
+                            var appRole = resourceSp.AppRoles.FirstOrDefault(r => r.Id == assignment.AppRoleId);
+                            
+                            apiPermissions.Add(new SharedApiPermission
+                            {
+                                Id = assignment.Id ?? string.Empty,
+                                ResourceDisplayName = resourceSp.DisplayName ?? assignment.ResourceDisplayName ?? string.Empty,
+                                ResourceId = assignment.ResourceId.ToString() ?? string.Empty,
+                                PermissionType = ApplicationPermissionType,
+                                PermissionValue = appRole?.Value ?? string.Empty
+                            });
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "Could not fetch resource details for app role assignment");
+                        
+                        // Add with limited information
+                        apiPermissions.Add(new SharedApiPermission
+                        {
+                            Id = assignment.Id ?? string.Empty,
+                            ResourceDisplayName = assignment.ResourceDisplayName ?? string.Empty,
+                            ResourceId = assignment.ResourceId.ToString() ?? string.Empty,
+                            PermissionType = ApplicationPermissionType,
+                            PermissionValue = string.Empty
+                        });
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not fetch API permissions (identity may not be a service principal)");
+        }
+
+        return apiPermissions;
     }
 
     private static string EscapeODataFilterValue(string value)

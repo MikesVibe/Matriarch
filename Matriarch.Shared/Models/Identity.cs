@@ -1,11 +1,23 @@
 namespace Matriarch.Shared.Models;
 
+public enum IdentityType
+{
+    User,
+    Group,
+    ServicePrincipal,
+    UserAssignedManagedIdentity,
+    SystemAssignedManagedIdentity
+}
+
 public class Identity
 {
     public string ObjectId { get; set; } = string.Empty;
     public string ApplicationId { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
+    public IdentityType Type { get; set; } = IdentityType.User;
+    public string? ServicePrincipalType { get; set; } // For SP: "Application", "ManagedIdentity"
+    public string? AppRegistrationId { get; set; } // ObjectId of the linked App Registration (for SP)
 }
 
 public class RoleAssignment
@@ -14,6 +26,15 @@ public class RoleAssignment
     public string RoleName { get; set; } = string.Empty;
     public string Scope { get; set; } = string.Empty;
     public string AssignedTo { get; set; } = string.Empty;
+}
+
+public class ApiPermission
+{
+    public string Id { get; set; } = string.Empty;
+    public string ResourceDisplayName { get; set; } = string.Empty;
+    public string ResourceId { get; set; } = string.Empty;
+    public string PermissionType { get; set; } = string.Empty;
+    public string PermissionValue { get; set; } = string.Empty;
 }
 
 public class SecurityGroup
@@ -30,4 +51,5 @@ public class IdentityRoleAssignmentResult
     public Identity Identity { get; set; } = new();
     public List<RoleAssignment> DirectRoleAssignments { get; set; } = new();
     public List<SecurityGroup> SecurityGroups { get; set; } = new();
+    public List<ApiPermission> ApiPermissions { get; set; } = new();
 }

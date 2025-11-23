@@ -44,7 +44,8 @@ public class DatabaseRoleAssignmentService : IRoleAssignmentService
             ObjectId = objectId ?? string.Empty,
             ApplicationId = applicationId ?? string.Empty,
             Email = email ?? string.Empty,
-            Name = name ?? string.Empty
+            Name = name ?? string.Empty,
+            Type = IdentityType.User // Default to User for database queries
         };
 
         // Only query database if we have a valid objectId (GUID)
@@ -91,7 +92,8 @@ public class DatabaseRoleAssignmentService : IRoleAssignmentService
         {
             Identity = identity,
             DirectRoleAssignments = directRoleAssignments,
-            SecurityGroups = securityGroups
+            SecurityGroups = securityGroups,
+            ApiPermissions = new List<ApiPermission>() // Not stored in database yet
         };
     }
 
