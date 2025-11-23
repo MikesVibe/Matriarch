@@ -444,7 +444,7 @@
 
         try
         {
-            result = await _roleAssignmentService.GetRoleAssignmentsAsync(selectedIdentity.ObjectId);
+            result = await _roleAssignmentService.GetRoleAssignmentsAsync(selectedIdentity);
         }
         catch (Exception ex)
         {
