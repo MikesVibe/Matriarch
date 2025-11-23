@@ -194,10 +194,11 @@ public class GroupManagementService : IGroupManagementService
         List<AzureRoleAssignmentDto> roleAssignments)
     {
         var securityGroups = new List<SharedSecurityGroup>();
+        var processedGroups = new HashSet<string>();
 
         foreach (var groupId in directGroupIds)
         {
-            var group = BuildSecurityGroupWithPreFetchedData(groupId, groupInfoMap, roleAssignments);
+            var group = BuildSecurityGroupWithPreFetchedData(groupId, groupInfoMap, roleAssignments, processedGroups);
             if (group != null)
             {
                 securityGroups.Add(group);
@@ -210,14 +211,24 @@ public class GroupManagementService : IGroupManagementService
     private SharedSecurityGroup? BuildSecurityGroupWithPreFetchedData(
         string groupId,
         Dictionary<string, GroupInfo> groupInfoMap,
-        List<AzureRoleAssignmentDto> allRoleAssignments)
+        List<AzureRoleAssignmentDto> allRoleAssignments,
+        HashSet<string> processedGroups)
     {
+        // Prevent infinite loops - if this group is already being processed, skip it
+        if (processedGroups.Contains(groupId))
+        {
+            return null;
+        }
+
         // Check if we have info for this group
         if (!groupInfoMap.TryGetValue(groupId, out var groupInfo))
         {
             _logger.LogWarning("Group info not found for {GroupId}", groupId);
             return null;
         }
+
+        // Mark this group as being processed
+        processedGroups.Add(groupId);
 
         // Get role assignments for this group
         var groupRoleAssignments = allRoleAssignments
@@ -231,11 +242,11 @@ public class GroupManagementService : IGroupManagementService
             })
             .ToList();
 
-        // Build parent groups using pre-fetched data (no recursion needed - just match with groupInfoMap)
+        // Build parent groups using pre-fetched data - simple matching with groupInfoMap
         var parentGroups = new List<SharedSecurityGroup>();
         foreach (var parentGroupId in groupInfo.ParentGroupIds)
         {
-            var parentGroup = BuildSecurityGroupWithPreFetchedData(parentGroupId, groupInfoMap, allRoleAssignments);
+            var parentGroup = BuildSecurityGroupWithPreFetchedData(parentGroupId, groupInfoMap, allRoleAssignments, processedGroups);
             if (parentGroup != null)
             {
                 parentGroups.Add(parentGroup);
