@@ -98,7 +98,8 @@ public class MockRoleAssignmentService : IRoleAssignmentService
             ObjectId = "12345678-1234-1234-1234-123456789abc",
             ApplicationId = "87654321-4321-4321-4321-cba987654321",
             Email = "user@example.com",
-            Name = identityInput
+            Name = identityInput,
+            Type = IdentityType.User
         };
 
         // Simulate that this user is member of the first two security groups

@@ -140,7 +140,8 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                         ObjectId = user.Id ?? identityInput,
                         ApplicationId = "",
                         Email = user.Mail ?? user.UserPrincipalName ?? "",
-                        Name = user.DisplayName ?? ""
+                        Name = user.DisplayName ?? "",
+                        Type = Matriarch.Shared.Models.IdentityType.User
                     };
                 }
             }
@@ -155,12 +156,16 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                 var sp = await _graphClient.ServicePrincipals[identityInput].GetAsync();
                 if (sp != null)
                 {
+                    var identityType = DetermineServicePrincipalType(sp.ServicePrincipalType);
                     return new SharedIdentity
                     {
                         ObjectId = sp.Id ?? identityInput,
                         ApplicationId = sp.AppId ?? "",
                         Email = "",
-                        Name = sp.DisplayName ?? ""
+                        Name = sp.DisplayName ?? "",
+                        Type = identityType,
+                        ServicePrincipalType = sp.ServicePrincipalType,
+                        AppRegistrationId = sp.AppOwnerOrganizationId?.ToString()
                     };
                 }
             }
@@ -183,12 +188,16 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                 if (sp != null)
                 {
                     _logger.LogInformation("Found Enterprise Application by Application ID: {AppId}", identityInput);
+                    var identityType = DetermineServicePrincipalType(sp.ServicePrincipalType);
                     return new SharedIdentity
                     {
                         ObjectId = sp.Id ?? "",
                         ApplicationId = sp.AppId ?? identityInput,
                         Email = "",
-                        Name = sp.DisplayName ?? ""
+                        Name = sp.DisplayName ?? "",
+                        Type = identityType,
+                        ServicePrincipalType = sp.ServicePrincipalType,
+                        AppRegistrationId = sp.AppOwnerOrganizationId?.ToString()
                     };
                 }
             }
@@ -209,7 +218,8 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                         ObjectId = group.Id ?? identityInput,
                         ApplicationId = "",
                         Email = "",
-                        Name = group.DisplayName ?? ""
+                        Name = group.DisplayName ?? "",
+                        Type = Matriarch.Shared.Models.IdentityType.Group
                     };
                 }
             }
@@ -238,7 +248,8 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                         ObjectId = user.Id ?? "",
                         ApplicationId = "",
                         Email = user.Mail ?? user.UserPrincipalName ?? identityInput,
-                        Name = user.DisplayName ?? ""
+                        Name = user.DisplayName ?? "",
+                        Type = Matriarch.Shared.Models.IdentityType.User
                     };
                 }
             }
@@ -267,7 +278,8 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                         ObjectId = user.Id ?? "",
                         ApplicationId = "",
                         Email = user.Mail ?? user.UserPrincipalName ?? "",
-                        Name = user.DisplayName ?? identityInput
+                        Name = user.DisplayName ?? identityInput,
+                        Type = Matriarch.Shared.Models.IdentityType.User
                     };
                 }
             }
@@ -289,12 +301,16 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                 var sp = sps?.Value?.FirstOrDefault();
                 if (sp != null)
                 {
+                    var identityType = DetermineServicePrincipalType(sp.ServicePrincipalType);
                     return new SharedIdentity
                     {
                         ObjectId = sp.Id ?? "",
                         ApplicationId = sp.AppId ?? "",
                         Email = "",
-                        Name = sp.DisplayName ?? identityInput
+                        Name = sp.DisplayName ?? identityInput,
+                        Type = identityType,
+                        ServicePrincipalType = sp.ServicePrincipalType,
+                        AppRegistrationId = sp.AppOwnerOrganizationId?.ToString()
                     };
                 }
             }
@@ -322,7 +338,8 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                         ObjectId = group.Id ?? "",
                         ApplicationId = "",
                         Email = "",
-                        Name = group.DisplayName ?? identityInput
+                        Name = group.DisplayName ?? identityInput,
+                        Type = Matriarch.Shared.Models.IdentityType.Group
                     };
                 }
             }
@@ -334,6 +351,16 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
 
         _logger.LogWarning("Identity could not be resolved from input: {Input}", identityInput);
         return null;
+    }
+
+    private static Matriarch.Shared.Models.IdentityType DetermineServicePrincipalType(string? servicePrincipalType)
+    {
+        return servicePrincipalType switch
+        {
+            "ManagedIdentity" => Matriarch.Shared.Models.IdentityType.UserAssignedManagedIdentity,
+            "Application" => Matriarch.Shared.Models.IdentityType.ServicePrincipal,
+            _ => Matriarch.Shared.Models.IdentityType.ServicePrincipal
+        };
     }
 
     private async Task<List<string>> GetGroupMembershipsAsync(string principalId)

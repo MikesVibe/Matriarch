@@ -76,17 +76,38 @@
                 </div>
                 <div class="card-body">
                     <dl class="row mb-0">
+                        <dt class="col-sm-3">Identity Type:</dt>
+                        <dd class="col-sm-9">
+                            <span class="badge bg-primary">@GetIdentityTypeDisplay(result.Identity.Type)</span>
+                            @if (!string.IsNullOrEmpty(result.Identity.ServicePrincipalType))
+                            {
+                                <span class="ms-2 text-muted">(@result.Identity.ServicePrincipalType)</span>
+                            }
+                        </dd>
+                        
                         <dt class="col-sm-3">Name:</dt>
                         <dd class="col-sm-9">@result.Identity.Name</dd>
                         
-                        <dt class="col-sm-3">Email:</dt>
-                        <dd class="col-sm-9">@result.Identity.Email</dd>
+                        @if (result.Identity.Type == Matriarch.Shared.Models.IdentityType.User)
+                        {
+                            <dt class="col-sm-3">Email:</dt>
+                            <dd class="col-sm-9">@result.Identity.Email</dd>
+                        }
                         
                         <dt class="col-sm-3">Object ID:</dt>
                         <dd class="col-sm-9"><code>@result.Identity.ObjectId</code></dd>
                         
-                        <dt class="col-sm-3">Application ID:</dt>
-                        <dd class="col-sm-9"><code>@result.Identity.ApplicationId</code></dd>
+                        @if (result.Identity.Type != Matriarch.Shared.Models.IdentityType.User && result.Identity.Type != Matriarch.Shared.Models.IdentityType.Group && !string.IsNullOrEmpty(result.Identity.ApplicationId))
+                        {
+                            <dt class="col-sm-3">Application ID:</dt>
+                            <dd class="col-sm-9"><code>@result.Identity.ApplicationId</code></dd>
+                        }
+                        
+                        @if (!string.IsNullOrEmpty(result.Identity.AppRegistrationId) && (result.Identity.Type == Matriarch.Shared.Models.IdentityType.ServicePrincipal || result.Identity.Type == Matriarch.Shared.Models.IdentityType.UserAssignedManagedIdentity))
+                        {
+                            <dt class="col-sm-3">App Registration:</dt>
+                            <dd class="col-sm-9"><code>@result.Identity.AppRegistrationId</code></dd>
+                        }
                     </dl>
                 </div>
             </div>
@@ -366,6 +387,19 @@
         }
         
         return (directGroups, indirectGroups);
+    }
+
+    private string GetIdentityTypeDisplay(Matriarch.Shared.Models.IdentityType identityType)
+    {
+        return identityType switch
+        {
+            Matriarch.Shared.Models.IdentityType.User => "User",
+            Matriarch.Shared.Models.IdentityType.Group => "Group",
+            Matriarch.Shared.Models.IdentityType.ServicePrincipal => "Service Principal",
+            Matriarch.Shared.Models.IdentityType.UserAssignedManagedIdentity => "User-Assigned Managed Identity",
+            Matriarch.Shared.Models.IdentityType.SystemAssignedManagedIdentity => "System-Assigned Managed Identity",
+            _ => "Unknown"
+        };
     }
 
     private List<RoleAssignment> GetAllRoleAssignments()

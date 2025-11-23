@@ -1,11 +1,23 @@
 namespace Matriarch.Shared.Models;
 
+public enum IdentityType
+{
+    User,
+    Group,
+    ServicePrincipal,
+    UserAssignedManagedIdentity,
+    SystemAssignedManagedIdentity
+}
+
 public class Identity
 {
     public string ObjectId { get; set; } = string.Empty;
     public string ApplicationId { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
+    public IdentityType Type { get; set; } = IdentityType.User;
+    public string? ServicePrincipalType { get; set; } // For SP: "Application", "ManagedIdentity"
+    public string? AppRegistrationId { get; set; } // ObjectId of the linked App Registration (for SP)
 }
 
 public class RoleAssignment
