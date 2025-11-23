@@ -4,16 +4,14 @@ using Microsoft.Graph.Beta;
 using Microsoft.Graph.Beta.Models;
 using Matriarch.Web.Models;
 using Matriarch.Web.Configuration;
-using SharedSecurityGroup = Matriarch.Web.Models.SecurityGroup;
-using SharedRoleAssignment = Matriarch.Web.Models.RoleAssignment;
 
 namespace Matriarch.Web.Services;
 
 public interface IGroupManagementService
 {
     Task<List<string>> GetGroupMembershipsAsync(string principalId);
-    Task<(List<string> allGroupIds, Dictionary<string, GroupInfo> groupInfoMap)> GetAllGroupsAsync(List<string> directGroupIds);
-    List<SharedSecurityGroup> BuildSecurityGroupsWithPreFetchedData(List<string> directGroupIds, Dictionary<string, GroupInfo> groupInfoMap, List<AzureRoleAssignmentDto> roleAssignments);
+    Task<(List<string> parentGroupIds, Dictionary<string, GroupInfo> groupInfoMap)> GetParentGroupsAsync(List<string> directGroupIds);
+    List<SecurityGroup> BuildSecurityGroupsWithPreFetchedData(List<string> directGroupIds, Dictionary<string, GroupInfo> groupInfoMap, List<AzureRoleAssignmentDto> roleAssignments);
 }
 
 public class GroupInfo
@@ -125,7 +123,7 @@ public class GroupManagementService : IGroupManagementService
         return groupIds;
     }
 
-    public async Task<(List<string> allGroupIds, Dictionary<string, GroupInfo> groupInfoMap)> GetAllGroupsAsync(List<string> directGroupIds)
+    public async Task<(List<string> parentGroupIds, Dictionary<string, GroupInfo> groupInfoMap)> GetParentGroupsAsync(List<string> directGroupIds)
     {
         var allGroupIds = new HashSet<string>(directGroupIds);
         var groupsToProcess = new Queue<string>(directGroupIds);
@@ -185,15 +183,15 @@ public class GroupManagementService : IGroupManagementService
             }
         }
 
-        return (allGroupIds.ToList(), groupInfoMap);
+        return (allGroupIds.Except(directGroupIds).ToList(), groupInfoMap);
     }
 
-    public List<SharedSecurityGroup> BuildSecurityGroupsWithPreFetchedData(
+    public List<SecurityGroup> BuildSecurityGroupsWithPreFetchedData(
         List<string> groupIds,
         Dictionary<string, GroupInfo> groupInfoMap,
         List<AzureRoleAssignmentDto> roleAssignments)
     {
-        var securityGroups = new List<SharedSecurityGroup>();
+        var securityGroups = new List<SecurityGroup>();
 
         foreach (var groupId in groupIds)
         {
@@ -207,7 +205,7 @@ public class GroupManagementService : IGroupManagementService
         return securityGroups;
     }
 
-    private SharedSecurityGroup? BuildSecurityGroupWithPreFetchedDataMiki(
+    private SecurityGroup? BuildSecurityGroupWithPreFetchedDataMiki(
       string groupId,
       Dictionary<string, GroupInfo> groupInfoMap,
       List<AzureRoleAssignmentDto> allRoleAssignments)
@@ -222,7 +220,7 @@ public class GroupManagementService : IGroupManagementService
         // Get role assignments for this group
         var groupRoleAssignments = allRoleAssignments
             .Where(ra => ra.PrincipalId == groupId)
-            .Select(ra => new SharedRoleAssignment
+            .Select(ra => new Models.RoleAssignment
             {
                 Id = ra.Id,
                 RoleName = ra.RoleName,
@@ -231,7 +229,7 @@ public class GroupManagementService : IGroupManagementService
             })
             .ToList();
 
-        return new SharedSecurityGroup
+        return new SecurityGroup
         {
             Id = groupInfo.Id,
             DisplayName = groupInfo.DisplayName,
