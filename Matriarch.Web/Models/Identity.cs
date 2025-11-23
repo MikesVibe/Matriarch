@@ -53,3 +53,9 @@ public class IdentityRoleAssignmentResult
     public List<SecurityGroup> SecurityGroups { get; set; } = new();
     public List<ApiPermission> ApiPermissions { get; set; } = new();
 }
+
+public class IdentitySearchResult
+{
+    public List<Identity> Identities { get; set; } = new();
+    public bool HasMultipleResults => Identities.Count > 1;
+}
