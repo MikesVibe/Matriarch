@@ -11,8 +11,8 @@ public enum IdentityType
 
 public class Identity
 {
-    public string ObjectId { get; set; } = string.Empty;
-    public string ApplicationId { get; set; } = string.Empty;
+    public string ObjectId { get; set; } = string.Empty; // For Service Principals, this is the Enterprise Application ObjectId
+    public string ApplicationId { get; set; } = string.Empty; // ClientId / ApplicationId (AppId)
     public string Email { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public IdentityType Type { get; set; } = IdentityType.User;

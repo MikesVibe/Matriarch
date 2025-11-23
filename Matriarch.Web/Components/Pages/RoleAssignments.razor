@@ -94,19 +94,28 @@
                             <dd class="col-sm-9">@result.Identity.Email</dd>
                         }
                         
-                        <dt class="col-sm-3">Object ID:</dt>
-                        <dd class="col-sm-9"><code>@result.Identity.ObjectId</code></dd>
-                        
-                        @if (result.Identity.Type != IdentityType.User && result.Identity.Type != IdentityType.Group && !string.IsNullOrEmpty(result.Identity.ApplicationId))
+                        @if (result.Identity.Type == IdentityType.User || result.Identity.Type == IdentityType.Group)
                         {
-                            <dt class="col-sm-3">Application ID:</dt>
-                            <dd class="col-sm-9"><code>@result.Identity.ApplicationId</code></dd>
+                            <dt class="col-sm-3">Object ID:</dt>
+                            <dd class="col-sm-9"><code>@result.Identity.ObjectId</code></dd>
                         }
                         
-                        @if (!string.IsNullOrEmpty(result.Identity.AppRegistrationId) && (result.Identity.Type == IdentityType.ServicePrincipal || result.Identity.Type == IdentityType.UserAssignedManagedIdentity))
+                        @if (result.Identity.Type != IdentityType.User && result.Identity.Type != IdentityType.Group)
                         {
-                            <dt class="col-sm-3">App Registration:</dt>
-                            <dd class="col-sm-9"><code>@result.Identity.AppRegistrationId</code></dd>
+                            <dt class="col-sm-3">Enterprise Application ObjectId:</dt>
+                            <dd class="col-sm-9"><code>@result.Identity.ObjectId</code></dd>
+                            
+                            @if (!string.IsNullOrEmpty(result.Identity.ApplicationId))
+                            {
+                                <dt class="col-sm-3">ClientId / ApplicationId:</dt>
+                                <dd class="col-sm-9"><code>@result.Identity.ApplicationId</code></dd>
+                            }
+                            
+                            @if (!string.IsNullOrEmpty(result.Identity.AppRegistrationId))
+                            {
+                                <dt class="col-sm-3">App Registration ObjectId:</dt>
+                                <dd class="col-sm-9"><code>@result.Identity.AppRegistrationId</code></dd>
+                            }
                         }
                     </dl>
                 </div>

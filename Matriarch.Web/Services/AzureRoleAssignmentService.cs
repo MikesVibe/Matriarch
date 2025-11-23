@@ -4,7 +4,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Graph.Beta;
 using Microsoft.Graph.Beta.Models;
 using Microsoft.Kiota.Abstractions;
-using Azure.Core;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -159,6 +158,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                 if (sp != null)
                 {
                     var identityType = DetermineServicePrincipalType(sp.ServicePrincipalType);
+                    var appRegistrationId = await GetAppRegistrationObjectIdAsync(sp.AppId);
                     return new SharedIdentity
                     {
                         ObjectId = sp.Id ?? identityInput,
@@ -167,7 +167,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                         Name = sp.DisplayName ?? "",
                         Type = identityType,
                         ServicePrincipalType = sp.ServicePrincipalType,
-                        AppRegistrationId = sp.AppOwnerOrganizationId?.ToString()
+                        AppRegistrationId = appRegistrationId
                     };
                 }
             }
@@ -191,6 +191,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                 {
                     _logger.LogInformation("Found Enterprise Application by Application ID: {AppId}", identityInput);
                     var identityType = DetermineServicePrincipalType(sp.ServicePrincipalType);
+                    var appRegistrationId = await GetAppRegistrationObjectIdAsync(sp.AppId);
                     return new SharedIdentity
                     {
                         ObjectId = sp.Id ?? "",
@@ -199,7 +200,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                         Name = sp.DisplayName ?? "",
                         Type = identityType,
                         ServicePrincipalType = sp.ServicePrincipalType,
-                        AppRegistrationId = sp.AppOwnerOrganizationId?.ToString()
+                        AppRegistrationId = appRegistrationId
                     };
                 }
             }
@@ -304,6 +305,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                 if (sp != null)
                 {
                     var identityType = DetermineServicePrincipalType(sp.ServicePrincipalType);
+                    var appRegistrationId = await GetAppRegistrationObjectIdAsync(sp.AppId);
                     return new SharedIdentity
                     {
                         ObjectId = sp.Id ?? "",
@@ -312,7 +314,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                         Name = sp.DisplayName ?? identityInput,
                         Type = identityType,
                         ServicePrincipalType = sp.ServicePrincipalType,
-                        AppRegistrationId = sp.AppOwnerOrganizationId?.ToString()
+                        AppRegistrationId = appRegistrationId
                     };
                 }
             }
@@ -363,6 +365,37 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             "Application" => IdentityType.ServicePrincipal,
             _ => IdentityType.ServicePrincipal
         };
+    }
+
+    private async Task<string?> GetAppRegistrationObjectIdAsync(string? appId)
+    {
+        if (string.IsNullOrEmpty(appId))
+        {
+            return null;
+        }
+
+        try
+        {
+            var escapedAppId = EscapeODataFilterValue(appId);
+            var apps = await _graphClient.Applications.GetAsync(config =>
+            {
+                config.QueryParameters.Filter = $"appId eq '{escapedAppId}'";
+                config.QueryParameters.Top = 1;
+            });
+
+            var app = apps?.Value?.FirstOrDefault();
+            if (app != null)
+            {
+                _logger.LogInformation("Found App Registration with ObjectId: {ObjectId} for AppId: {AppId}", app.Id, appId);
+                return app.Id;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not fetch App Registration for AppId: {AppId}", appId);
+        }
+
+        return null;
     }
 
     private async Task<List<string>> GetGroupMembershipsAsync(string principalId)
