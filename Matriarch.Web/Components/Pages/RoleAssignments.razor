@@ -17,14 +17,6 @@
             </div>
             <div class="card-body">
                 <div class="row g-3">
-                    <div class="col-md-6">
-                        <label for="dataSource" class="form-label">Data Source:</label>
-                        <select class="form-select" id="dataSource" @bind="dataSource">
-                            <option value="Local">Local Database</option>
-                            <option value="Azure">Azure (Direct)</option>
-                        </select>
-                    </div>
-                    <div class="col-md-6"></div>
                     <div class="col-md-12">
                         <label for="identityInput" class="form-label">Identity (Email, Object ID, Application ID, Group ID, or Name):</label>
                         <input type="text" class="form-control" id="identityInput" @bind="identityInput" placeholder="user@example.com" />
@@ -43,10 +35,6 @@
                             <span>Load Role Assignments</span>
                         }
                     </button>
-                    @if (!string.IsNullOrEmpty(dataSource))
-                    {
-                        <span class="ms-3 text-muted">Using: <strong>@dataSource</strong></span>
-                    }
                 </div>
             </div>
         </div>
@@ -407,7 +395,6 @@
 }
 
 @code {
-    private string dataSource = "Azure";
     private string identityInput = "";
     private bool isLoading = false;
     private IdentityRoleAssignmentResult? result;

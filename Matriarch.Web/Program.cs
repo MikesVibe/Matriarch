@@ -14,6 +14,8 @@ builder.Configuration.Bind(appSettings);
 builder.Services.AddSingleton(appSettings);
 
 // Register custom services for role assignments
+builder.Services.AddScoped<IIdentityService, IdentityService>();
+builder.Services.AddScoped<IGroupManagementService, GroupManagementService>();
 builder.Services.AddScoped<IRoleAssignmentService, AzureRoleAssignmentService>();
 
 var app = builder.Build();
