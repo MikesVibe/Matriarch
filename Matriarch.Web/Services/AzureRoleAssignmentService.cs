@@ -77,7 +77,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             var directGroupIds = await GetGroupMembershipsAsync(resolvedIdentity.ObjectId);
             
             // Step 3: Fetch all groups (direct and indirect) before fetching role assignments
-            var allGroupIds = await GetAllGroupsAsync(directGroupIds);
+            var (allGroupIds, groupInfoMap) = await GetAllGroupsAsync(directGroupIds);
             
             _logger.LogInformation("Found {DirectCount} direct groups and {TotalCount} total groups (including indirect)", 
                 directGroupIds.Count, allGroupIds.Count);
@@ -100,8 +100,8 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                 })
                 .ToList();
 
-            // Step 5: Build security group hierarchy with role assignments
-            var securityGroups = await BuildSecurityGroupsAsync(directGroupIds, roleAssignments);
+            // Step 5: Build security group hierarchy with role assignments using pre-fetched group info
+            var securityGroups = BuildSecurityGroupsWithPreFetchedData(directGroupIds, groupInfoMap, roleAssignments);
 
             // Step 6: Fetch API permissions if this is a service principal
             var apiPermissions = await GetApiPermissionsAsync(resolvedIdentity.ObjectId);
@@ -313,11 +313,12 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
         return groupIds;
     }
 
-    private async Task<List<string>> GetAllGroupsAsync(List<string> directGroupIds)
+    private async Task<(List<string> allGroupIds, Dictionary<string, GroupInfo> groupInfoMap)> GetAllGroupsAsync(List<string> directGroupIds)
     {
         var allGroupIds = new HashSet<string>(directGroupIds);
         var groupsToProcess = new Queue<string>(directGroupIds);
         var processedGroups = new HashSet<string>();
+        var groupInfoMap = new Dictionary<string, GroupInfo>();
 
         while (groupsToProcess.Count > 0)
         {
@@ -333,18 +334,21 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
 
             try
             {
-                // Get parent groups (groups this group is a member of)
+                // Get group details and parent groups in a single operation
+                var group = await _graphClient.Groups[currentGroupId].GetAsync();
                 var memberOfPage = await _graphClient.Groups[currentGroupId].MemberOf.GetAsync(config =>
                 {
                     config.QueryParameters.Top = MaxGraphPageSize;
                 });
 
+                var parentGroupIds = new List<string>();
                 if (memberOfPage?.Value != null)
                 {
                     foreach (var directoryObject in memberOfPage.Value)
                     {
                         if (directoryObject is Group parentGroup && parentGroup.SecurityEnabled == true && !string.IsNullOrEmpty(parentGroup.Id))
                         {
+                            parentGroupIds.Add(parentGroup.Id);
                             if (allGroupIds.Add(parentGroup.Id))
                             {
                                 // New group found, add to queue for processing
@@ -353,6 +357,15 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                         }
                     }
                 }
+
+                // Store group information
+                groupInfoMap[currentGroupId] = new GroupInfo
+                {
+                    Id = group?.Id ?? currentGroupId,
+                    DisplayName = group?.DisplayName ?? string.Empty,
+                    Description = group?.Description ?? string.Empty,
+                    ParentGroupIds = parentGroupIds
+                };
             }
             catch (Exception ex)
             {
@@ -360,7 +373,15 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             }
         }
 
-        return allGroupIds.ToList();
+        return (allGroupIds.ToList(), groupInfoMap);
+    }
+
+    private class GroupInfo
+    {
+        public string Id { get; set; } = string.Empty;
+        public string DisplayName { get; set; } = string.Empty;
+        public string Description { get; set; } = string.Empty;
+        public List<string> ParentGroupIds { get; set; } = new();
     }
 
     private async Task<List<AzureRoleAssignmentDto>> FetchRoleAssignmentsForPrincipalsAsync(List<string> principalIds)
@@ -416,15 +437,16 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
         return roleAssignments;
     }
 
-    private async Task<List<SharedSecurityGroup>> BuildSecurityGroupsAsync(
-        List<string> groupIds, 
+    private List<SharedSecurityGroup> BuildSecurityGroupsWithPreFetchedData(
+        List<string> groupIds,
+        Dictionary<string, GroupInfo> groupInfoMap,
         List<AzureRoleAssignmentDto> roleAssignments)
     {
         var securityGroups = new List<SharedSecurityGroup>();
 
         foreach (var groupId in groupIds)
         {
-            var group = await BuildSecurityGroupAsync(groupId, roleAssignments, new HashSet<string>());
+            var group = BuildSecurityGroupWithPreFetchedData(groupId, groupInfoMap, roleAssignments, new HashSet<string>());
             if (group != null)
             {
                 securityGroups.Add(group);
@@ -434,8 +456,9 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
         return securityGroups;
     }
 
-    private async Task<SharedSecurityGroup?> BuildSecurityGroupAsync(
+    private SharedSecurityGroup? BuildSecurityGroupWithPreFetchedData(
         string groupId,
+        Dictionary<string, GroupInfo> groupInfoMap,
         List<AzureRoleAssignmentDto> allRoleAssignments,
         HashSet<string> currentPath)
     {
@@ -445,19 +468,18 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             return null;
         }
 
+        // Check if we have info for this group
+        if (!groupInfoMap.TryGetValue(groupId, out var groupInfo))
+        {
+            _logger.LogWarning("Group info not found for {GroupId}", groupId);
+            return null;
+        }
+
         // Add to current path for circular reference detection
         currentPath.Add(groupId);
 
         try
         {
-            // Get group details
-            var group = await _graphClient.Groups[groupId].GetAsync();
-            
-            if (group == null)
-            {
-                return null;
-            }
-
             // Get role assignments for this group
             var groupRoleAssignments = allRoleAssignments
                 .Where(ra => ra.PrincipalId == groupId)
@@ -466,34 +488,20 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                     Id = ra.Id,
                     RoleName = ra.RoleName,
                     Scope = ra.Scope,
-                    AssignedTo = group.DisplayName ?? groupId
+                    AssignedTo = groupInfo.DisplayName
                 })
                 .ToList();
 
-            // Get parent groups (groups this group is a member of)
+            // Build parent groups using pre-fetched data
             var parentGroups = new List<SharedSecurityGroup>();
-            var memberOfPage = await _graphClient.Groups[groupId].MemberOf.GetAsync(config =>
+            foreach (var parentGroupId in groupInfo.ParentGroupIds)
             {
-                config.QueryParameters.Top = MaxGraphPageSize;
-            });
-
-            if (memberOfPage?.Value != null)
-            {
-                foreach (var directoryObject in memberOfPage.Value)
+                // Create a new path copy for each parent branch to properly detect circular references
+                var newPath = new HashSet<string>(currentPath);
+                var securityParentGroup = BuildSecurityGroupWithPreFetchedData(parentGroupId, groupInfoMap, allRoleAssignments, newPath);
+                if (securityParentGroup != null)
                 {
-                    if (directoryObject is Group parentGroup && parentGroup.SecurityEnabled == true)
-                    {
-                        if (!string.IsNullOrEmpty(parentGroup.Id))
-                        {
-                            // Create a new path copy for each parent branch to properly detect circular references
-                            var newPath = new HashSet<string>(currentPath);
-                            var securityParentGroup = await BuildSecurityGroupAsync(parentGroup.Id, allRoleAssignments, newPath);
-                            if (securityParentGroup != null)
-                            {
-                                parentGroups.Add(securityParentGroup);
-                            }
-                        }
-                    }
+                    parentGroups.Add(securityParentGroup);
                 }
             }
 
@@ -502,9 +510,9 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
 
             return new SharedSecurityGroup
             {
-                Id = group.Id ?? groupId,
-                DisplayName = group.DisplayName ?? string.Empty,
-                Description = group.Description ?? string.Empty,
+                Id = groupInfo.Id,
+                DisplayName = groupInfo.DisplayName,
+                Description = groupInfo.Description,
                 RoleAssignments = groupRoleAssignments,
                 ParentGroups = parentGroups
             };
