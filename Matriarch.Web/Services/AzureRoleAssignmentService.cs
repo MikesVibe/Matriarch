@@ -206,7 +206,45 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Not found as application by ApplicationId, trying as group");
+                _logger.LogDebug(ex, "Not found as application by ApplicationId, trying as App Registration by ObjectId");
+            }
+
+            // Try as App Registration (by ObjectId)
+            try
+            {
+                var app = await _graphClient.Applications[identityInput].GetAsync();
+                if (app != null && !string.IsNullOrEmpty(app.AppId))
+                {
+                    _logger.LogInformation("Found App Registration by ObjectId: {ObjectId}, looking for Enterprise Application", identityInput);
+                    
+                    // Find the corresponding Service Principal (Enterprise Application) using the AppId
+                    var escapedAppId = EscapeODataFilterValue(app.AppId);
+                    var sps = await _graphClient.ServicePrincipals.GetAsync(config =>
+                    {
+                        config.QueryParameters.Filter = $"appId eq '{escapedAppId}'";
+                        config.QueryParameters.Top = 1;
+                    });
+
+                    var sp = sps?.Value?.FirstOrDefault();
+                    if (sp != null)
+                    {
+                        var identityType = DetermineServicePrincipalType(sp.ServicePrincipalType);
+                        return new SharedIdentity
+                        {
+                            ObjectId = sp.Id ?? "",
+                            ApplicationId = sp.AppId ?? app.AppId,
+                            Email = "",
+                            Name = sp.DisplayName ?? app.DisplayName ?? "",
+                            Type = identityType,
+                            ServicePrincipalType = sp.ServicePrincipalType,
+                            AppRegistrationId = app.Id // Use the App Registration ObjectId we already have
+                        };
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Not found as App Registration by ObjectId, trying as group");
             }
 
             // Try as Group (by ObjectId)
