@@ -30,14 +30,22 @@ public class AzureApiPermissionsService : IApiPermissionsService
         _graphClient = new GraphServiceClient(credential);
     }
 
-    public async Task<List<ApiPermission>> GetApiPermissionsAsync(string principalId)
+    public async Task<List<ApiPermission>> GetApiPermissionsAsync(Identity identity)
     {
+        // Users and Groups don't have API permissions (app role assignments)
+        // Only Service Principals and Managed Identities can have API permissions
+        if (identity.Type == IdentityType.User || identity.Type == IdentityType.Group)
+        {
+            _logger.LogInformation("Skipping API permissions fetch for identity type: {IdentityType}", identity.Type);
+            return new List<ApiPermission>();
+        }
+
         var apiPermissions = new List<ApiPermission>();
 
         try
         {
-            // Try to get app role assignments for a service principal
-            var appRoleAssignments = await _graphClient.ServicePrincipals[principalId]
+            // Try to get app role assignments for a service principal or managed identity
+            var appRoleAssignments = await _graphClient.ServicePrincipals[identity.ObjectId]
                 .AppRoleAssignments
                 .GetAsync(config =>
                 {
@@ -91,7 +99,8 @@ public class AzureApiPermissionsService : IApiPermissionsService
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Could not fetch API permissions (identity may not be a service principal)");
+            _logger.LogWarning(ex, "Could not fetch API permissions for {IdentityType} {ObjectId}", 
+                identity.Type, identity.ObjectId);
         }
 
         return apiPermissions;

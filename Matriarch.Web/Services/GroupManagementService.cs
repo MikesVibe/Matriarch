@@ -9,7 +9,7 @@ namespace Matriarch.Web.Services;
 
 public interface IGroupManagementService
 {
-    Task<List<string>> GetGroupMembershipsAsync(string principalId);
+    Task<List<string>> GetGroupMembershipsAsync(Models.Identity identity);
     Task<(List<string> parentGroupIds, Dictionary<string, GroupInfo> groupInfoMap)> GetParentGroupsAsync(List<string> directGroupIds);
     List<SecurityGroup> BuildSecurityGroupsWithPreFetchedData(List<string> directGroupIds, Dictionary<string, GroupInfo> groupInfoMap, List<AzureRoleAssignmentDto> roleAssignments);
 }
@@ -52,17 +52,27 @@ public class GroupManagementService : IGroupManagementService
         _graphClient = new GraphServiceClient(credential);
     }
 
-    public async Task<List<string>> GetGroupMembershipsAsync(string principalId)
+    public async Task<List<string>> GetGroupMembershipsAsync(Models.Identity identity)
     {
         var groupIds = new List<string>();
 
         try
         {
-            // Try as user first
-            var memberOfPage = await _graphClient.Users[principalId].MemberOf.GetAsync(config =>
+            DirectoryObjectCollectionResponse? memberOfPage = identity.Type switch
             {
-                config.QueryParameters.Top = MaxGraphPageSize;
-            });
+                IdentityType.User => await _graphClient.Users[identity.ObjectId].MemberOf.GetAsync(config =>
+                {
+                    config.QueryParameters.Top = MaxGraphPageSize;
+                }),
+                IdentityType.ServicePrincipal or 
+                IdentityType.UserAssignedManagedIdentity or 
+                IdentityType.SystemAssignedManagedIdentity => await _graphClient.ServicePrincipals[identity.ObjectId].MemberOf.GetAsync(config =>
+                {
+                    config.QueryParameters.Top = MaxGraphPageSize;
+                }),
+                IdentityType.Group => await HandleGroupIdentityAsync(identity.ObjectId, groupIds),
+                _ => throw new InvalidOperationException($"Unsupported identity type: {identity.Type}")
+            };
 
             if (memberOfPage?.Value != null)
             {
@@ -77,50 +87,26 @@ public class GroupManagementService : IGroupManagementService
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Not a user, trying as service principal");
-            
-            try
-            {
-                // Try as service principal
-                var spMemberOfPage = await _graphClient.ServicePrincipals[principalId].MemberOf.GetAsync(config =>
-                {
-                    config.QueryParameters.Top = MaxGraphPageSize;
-                });
-
-                if (spMemberOfPage?.Value != null)
-                {
-                    foreach (var directoryObject in spMemberOfPage.Value)
-                    {
-                        if (directoryObject is Group group && group.SecurityEnabled == true && !string.IsNullOrEmpty(group.Id))
-                        {
-                            groupIds.Add(group.Id);
-                        }
-                    }
-                }
-            }
-            catch (Exception spEx)
-            {
-                _logger.LogDebug(spEx, "Not a service principal, trying as group");
-                
-                try
-                {
-                    // Try as group - if the identity is a group, return it as its own "direct membership"
-                    var group = await _graphClient.Groups[principalId].GetAsync();
-                    if (group != null && group.SecurityEnabled == true)
-                    {
-                        // For a group, we treat it as being "member" of itself for role assignment purposes
-                        groupIds.Add(principalId);
-                        _logger.LogInformation("Identity is a group, will fetch its role assignments");
-                    }
-                }
-                catch (Exception groupEx)
-                {
-                    _logger.LogWarning(groupEx, "Could not fetch group memberships for any entity type");
-                }
-            }
+            _logger.LogError(ex, "Error fetching group memberships for identity {ObjectId} of type {IdentityType}", 
+                identity.ObjectId, identity.Type);
+            throw;
         }
 
         return groupIds;
+    }
+
+    private async Task<DirectoryObjectCollectionResponse?> HandleGroupIdentityAsync(string groupId, List<string> groupIds)
+    {
+        // For a group identity, verify it exists and is a security group
+        var group = await _graphClient.Groups[groupId].GetAsync();
+        if (group != null && group.SecurityEnabled == true)
+        {
+            // For a group, we treat it as being "member" of itself for role assignment purposes
+            groupIds.Add(groupId);
+            _logger.LogInformation("Identity is a group, will fetch its role assignments");
+        }
+        // Return null as groups don't have memberOf in this context
+        return null;
     }
 
     public async Task<(List<string> parentGroupIds, Dictionary<string, GroupInfo> groupInfoMap)> GetParentGroupsAsync(List<string> directGroupIds)

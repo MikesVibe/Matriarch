@@ -109,8 +109,8 @@ public class MockRoleAssignmentService : IRoleAssignmentService
         // Simulate that this user is member of the first two security groups
         var userSecurityGroups = _mockSecurityGroups.Take(2).ToList();
 
-        // Get mock API permissions from the service
-        var apiPermissions = await _apiPermissionsService.GetApiPermissionsAsync(identity.ObjectId);
+        // Get mock API permissions from the service (will return empty list for User type)
+        var apiPermissions = await _apiPermissionsService.GetApiPermissionsAsync(identity);
 
         var result = new IdentityRoleAssignmentResult
         {

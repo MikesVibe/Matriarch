@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Matriarch.Web.Models;
 
 namespace Matriarch.Web.Services;
@@ -40,7 +41,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             _logger.LogInformation("Resolved identity: {Name} ({ObjectId})", resolvedIdentity.Name, resolvedIdentity.ObjectId);
 
             // Step 2: Get direct group memberships
-            var directGroupIds = await _groupManagementService.GetGroupMembershipsAsync(resolvedIdentity.ObjectId);
+            var directGroupIds = await _groupManagementService.GetGroupMembershipsAsync(resolvedIdentity);
             
             var (parentGroupIds, groupInfoMap) = await _groupManagementService.GetParentGroupsAsync(directGroupIds);
 
@@ -69,8 +70,8 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             var securityDirectGroups = _groupManagementService.BuildSecurityGroupsWithPreFetchedData(directGroupIds, groupInfoMap, roleAssignments);
             var securityIndirectGroups = _groupManagementService.BuildSecurityGroupsWithPreFetchedData(parentGroupIds, groupInfoMap, roleAssignments);
 
-            // Step 6: Fetch API permissions if this is a service principal
-            var apiPermissions = await _apiPermissionsService.GetApiPermissionsAsync(resolvedIdentity.ObjectId);
+            // Step 6: Fetch API permissions (only for service principals and managed identities)
+            var apiPermissions = await _apiPermissionsService.GetApiPermissionsAsync(resolvedIdentity);
 
             return new IdentityRoleAssignmentResult
             {
