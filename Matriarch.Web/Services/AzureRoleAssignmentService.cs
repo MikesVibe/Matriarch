@@ -122,6 +122,148 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
         }
     }
 
+    public async Task<IdentitySearchResult> SearchIdentitiesAsync(string searchInput)
+    {
+        _logger.LogInformation("Searching for identities matching: {SearchInput}", searchInput);
+
+        var identities = new List<SharedIdentity>();
+
+        try
+        {
+            // If it's a GUID, try exact match lookups (will return at most one result per type)
+            if (Guid.TryParse(searchInput, out _))
+            {
+                var identity = await ResolveIdentityAsync(searchInput);
+                if (identity != null)
+                {
+                    identities.Add(identity);
+                }
+            }
+            else if (searchInput.Contains("@"))
+            {
+                // Email search - may return one user
+                var identity = await ResolveIdentityAsync(searchInput);
+                if (identity != null)
+                {
+                    identities.Add(identity);
+                }
+            }
+            else
+            {
+                // Display name search - can return multiple results
+                identities.AddRange(await SearchByDisplayNameAsync(searchInput));
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error searching for identities");
+        }
+
+        return new IdentitySearchResult
+        {
+            Identities = identities
+        };
+    }
+
+    private async Task<List<SharedIdentity>> SearchByDisplayNameAsync(string displayName)
+    {
+        var identities = new List<SharedIdentity>();
+        var escapedInput = EscapeODataFilterValue(displayName);
+
+        // Search for users
+        try
+        {
+            var users = await _graphClient.Users.GetAsync(config =>
+            {
+                config.QueryParameters.Filter = $"startswith(displayName, '{escapedInput}')";
+                config.QueryParameters.Top = 10; // Limit to 10 results
+            });
+
+            if (users?.Value != null)
+            {
+                foreach (var user in users.Value)
+                {
+                    identities.Add(new SharedIdentity
+                    {
+                        ObjectId = user.Id ?? "",
+                        ApplicationId = "",
+                        Email = user.Mail ?? user.UserPrincipalName ?? "",
+                        Name = user.DisplayName ?? "",
+                        Type = IdentityType.User
+                    });
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Error searching users by display name");
+        }
+
+        // Search for service principals
+        try
+        {
+            var sps = await _graphClient.ServicePrincipals.GetAsync(config =>
+            {
+                config.QueryParameters.Filter = $"startswith(displayName, '{escapedInput}')";
+                config.QueryParameters.Top = 10; // Limit to 10 results
+            });
+
+            if (sps?.Value != null)
+            {
+                foreach (var sp in sps.Value)
+                {
+                    var identityType = DetermineServicePrincipalType(sp.ServicePrincipalType);
+                    var appRegistrationId = await GetAppRegistrationObjectIdAsync(sp.AppId);
+                    identities.Add(new SharedIdentity
+                    {
+                        ObjectId = sp.Id ?? "",
+                        ApplicationId = sp.AppId ?? "",
+                        Email = "",
+                        Name = sp.DisplayName ?? "",
+                        Type = identityType,
+                        ServicePrincipalType = sp.ServicePrincipalType,
+                        AppRegistrationId = appRegistrationId
+                    });
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Error searching service principals by display name");
+        }
+
+        // Search for groups
+        try
+        {
+            var groups = await _graphClient.Groups.GetAsync(config =>
+            {
+                config.QueryParameters.Filter = $"startswith(displayName, '{escapedInput}') and securityEnabled eq true";
+                config.QueryParameters.Top = 10; // Limit to 10 results
+            });
+
+            if (groups?.Value != null)
+            {
+                foreach (var group in groups.Value)
+                {
+                    identities.Add(new SharedIdentity
+                    {
+                        ObjectId = group.Id ?? "",
+                        ApplicationId = "",
+                        Email = "",
+                        Name = group.DisplayName ?? "",
+                        Type = IdentityType.Group
+                    });
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Error searching groups by display name");
+        }
+
+        return identities;
+    }
+
     private async Task<SharedIdentity?> ResolveIdentityAsync(string identityInput)
     {
         _logger.LogInformation("Resolving identity from input: {Input}", identityInput);

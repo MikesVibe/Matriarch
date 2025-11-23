@@ -5,6 +5,7 @@ namespace Matriarch.Web.Services;
 public interface IRoleAssignmentService
 {
     Task<IdentityRoleAssignmentResult> GetRoleAssignmentsAsync(string identityInput);
+    Task<IdentitySearchResult> SearchIdentitiesAsync(string searchInput);
 }
 
 public class MockRoleAssignmentService : IRoleAssignmentService
@@ -135,5 +136,16 @@ public class MockRoleAssignmentService : IRoleAssignmentService
         };
 
         return Task.FromResult(result);
+    }
+
+    public Task<IdentitySearchResult> SearchIdentitiesAsync(string searchInput)
+    {
+        // For demo purposes, return empty search results
+        var searchResult = new IdentitySearchResult
+        {
+            Identities = new List<Identity>()
+        };
+
+        return Task.FromResult(searchResult);
     }
 }
