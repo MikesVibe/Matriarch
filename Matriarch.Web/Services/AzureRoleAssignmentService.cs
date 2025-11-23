@@ -128,7 +128,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
         // Auto-detect input type
         if (Guid.TryParse(identityInput, out _))
         {
-            // It's a GUID - could be ObjectId or ApplicationId
+            // It's a GUID - could be ObjectId, ApplicationId, or GroupId
             // Try as User first
             try
             {
@@ -149,7 +149,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                 _logger.LogDebug(ex, "Not found as user, trying as service principal");
             }
 
-            // Try as Service Principal
+            // Try as Service Principal (by ObjectId)
             try
             {
                 var sp = await _graphClient.ServicePrincipals[identityInput].GetAsync();
@@ -166,7 +166,56 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Identity not found by ObjectId");
+                _logger.LogDebug(ex, "Not found as service principal by ObjectId, trying as ApplicationId");
+            }
+
+            // Try as Application ID (find the App Registration and its Enterprise Application)
+            try
+            {
+                var escapedInput = EscapeODataFilterValue(identityInput);
+                var sps = await _graphClient.ServicePrincipals.GetAsync(config =>
+                {
+                    config.QueryParameters.Filter = $"appId eq '{escapedInput}'";
+                    config.QueryParameters.Top = 1;
+                });
+
+                var sp = sps?.Value?.FirstOrDefault();
+                if (sp != null)
+                {
+                    _logger.LogInformation("Found Enterprise Application by Application ID: {AppId}", identityInput);
+                    return new SharedIdentity
+                    {
+                        ObjectId = sp.Id ?? "",
+                        ApplicationId = sp.AppId ?? identityInput,
+                        Email = "",
+                        Name = sp.DisplayName ?? ""
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Not found as application by ApplicationId, trying as group");
+            }
+
+            // Try as Group (by ObjectId)
+            try
+            {
+                var group = await _graphClient.Groups[identityInput].GetAsync();
+                if (group != null && group.SecurityEnabled == true)
+                {
+                    _logger.LogInformation("Found Security Group by ID: {GroupId}", identityInput);
+                    return new SharedIdentity
+                    {
+                        ObjectId = group.Id ?? identityInput,
+                        ApplicationId = "",
+                        Email = "",
+                        Name = group.DisplayName ?? ""
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Identity not found by GUID");
             }
         }
         else if (identityInput.Contains("@"))
@@ -251,10 +300,39 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Service principal not found by name");
+                _logger.LogDebug(ex, "Service principal not found by name, trying group");
+            }
+
+            // Try as Group by display name
+            try
+            {
+                var escapedInput = EscapeODataFilterValue(identityInput);
+                var groups = await _graphClient.Groups.GetAsync(config =>
+                {
+                    config.QueryParameters.Filter = $"startswith(displayName, '{escapedInput}') and securityEnabled eq true";
+                    config.QueryParameters.Top = 1;
+                });
+
+                var group = groups?.Value?.FirstOrDefault();
+                if (group != null)
+                {
+                    _logger.LogInformation("Found Security Group by name: {GroupName}", identityInput);
+                    return new SharedIdentity
+                    {
+                        ObjectId = group.Id ?? "",
+                        ApplicationId = "",
+                        Email = "",
+                        Name = group.DisplayName ?? identityInput
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Group not found by name");
             }
         }
 
+        _logger.LogWarning("Identity could not be resolved from input: {Input}", identityInput);
         return null;
     }
 
@@ -306,7 +384,23 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             }
             catch (Exception spEx)
             {
-                _logger.LogWarning(spEx, "Could not fetch group memberships");
+                _logger.LogDebug(spEx, "Not a service principal, trying as group");
+                
+                try
+                {
+                    // Try as group - if the identity is a group, return it as its own "direct membership"
+                    var group = await _graphClient.Groups[principalId].GetAsync();
+                    if (group != null && group.SecurityEnabled == true)
+                    {
+                        // For a group, we treat it as being "member" of itself for role assignment purposes
+                        groupIds.Add(principalId);
+                        _logger.LogInformation("Identity is a group, will fetch its role assignments");
+                    }
+                }
+                catch (Exception groupEx)
+                {
+                    _logger.LogWarning(groupEx, "Could not fetch group memberships for any entity type");
+                }
             }
         }
 
