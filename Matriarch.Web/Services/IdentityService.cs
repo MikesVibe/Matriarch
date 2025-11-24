@@ -401,7 +401,7 @@ public class IdentityService : IIdentityService
         return null;
     }
 
-    private static IdentityType DetermineServicePrincipalType(string? servicePrincipalType, IEnumerable<string>? alternativeNames)
+    private IdentityType DetermineServicePrincipalType(string? servicePrincipalType, IEnumerable<string>? alternativeNames)
     {
         if (servicePrincipalType != "ManagedIdentity")
         {
@@ -427,7 +427,8 @@ public class IdentityService : IIdentityService
             }
         }
 
-        // Default to User-Assigned if we can't determine
+        // Default to User-Assigned if we can't determine (more common case)
+        _logger.LogWarning("Unable to determine managed identity type from alternativeNames, defaulting to User-Assigned");
         return IdentityType.UserAssignedManagedIdentity;
     }
 
@@ -457,12 +458,13 @@ public class IdentityService : IIdentityService
                         }
                     }
 
-                    // If we found subscription ID, log the extracted information
+                    // If we found subscription ID, we've extracted what we need from this alternativeName
+                    // (resource group may or may not be present in the same path)
                     if (!string.IsNullOrEmpty(identity.SubscriptionId))
                     {
                         _logger.LogInformation("Extracted MI resource info - SubscriptionId: {SubId}, ResourceGroup: {RG}", 
-                            identity.SubscriptionId, identity.ResourceGroup);
-                        break; // We found what we need
+                            identity.SubscriptionId, identity.ResourceGroup ?? "N/A");
+                        break; // Stop processing additional alternativeNames
                     }
                 }
                 catch (Exception ex)
