@@ -4,16 +4,20 @@ namespace Matriarch.Web.Services;
 
 public interface IRoleAssignmentService
 {
-    Task<IdentityRoleAssignmentResult> GetRoleAssignmentsAsync(string identityInput);
+    Task<IdentityRoleAssignmentResult> GetRoleAssignmentsAsync(Identity identity);
+    Task<IdentitySearchResult> SearchIdentitiesAsync(string searchInput);
 }
 
 public class MockRoleAssignmentService : IRoleAssignmentService
 {
+    private readonly IApiPermissionsService _apiPermissionsService;
     private readonly List<RoleAssignment> _mockRoleAssignments;
     private readonly List<SecurityGroup> _mockSecurityGroups;
     
-    public MockRoleAssignmentService()
+    public MockRoleAssignmentService(IApiPermissionsService apiPermissionsService)
     {
+        _apiPermissionsService = apiPermissionsService;
+
         // Create mock parent security groups
         var parentGroup1 = new SecurityGroup
         {
@@ -88,52 +92,36 @@ public class MockRoleAssignmentService : IRoleAssignmentService
         };
     }
 
-    public Task<IdentityRoleAssignmentResult> GetRoleAssignmentsAsync(string identityInput)
+    public async Task<IdentityRoleAssignmentResult> GetRoleAssignmentsAsync(Identity identity)
     {
-        // For demo purposes, return mock data for any input
+        // For demo purposes, return mock data for the provided identity
         // In a real implementation, this would query Azure or Neo4j
         
-        var identity = new Identity
-        {
-            ObjectId = "12345678-1234-1234-1234-123456789abc",
-            ApplicationId = "87654321-4321-4321-4321-cba987654321",
-            Email = "user@example.com",
-            Name = identityInput,
-            Type = IdentityType.User
-        };
-
         // Simulate that this user is member of the first two security groups
         var userSecurityGroups = _mockSecurityGroups.Take(2).ToList();
 
-        // Mock API permissions
-        var apiPermissions = new List<ApiPermission>
-        {
-            new ApiPermission
-            {
-                Id = "api-1",
-                ResourceDisplayName = "Microsoft Graph",
-                ResourceId = "00000003-0000-0000-c000-000000000000",
-                PermissionType = "Application",
-                PermissionValue = "User.Read.All"
-            },
-            new ApiPermission
-            {
-                Id = "api-2",
-                ResourceDisplayName = "Microsoft Graph",
-                ResourceId = "00000003-0000-0000-c000-000000000000",
-                PermissionType = "Application",
-                PermissionValue = "Directory.Read.All"
-            }
-        };
+        // Get mock API permissions from the service (will return empty list for User type)
+        var apiPermissions = await _apiPermissionsService.GetApiPermissionsAsync(identity);
 
         var result = new IdentityRoleAssignmentResult
         {
             Identity = identity,
             DirectRoleAssignments = _mockRoleAssignments,
-            SecurityGroups = userSecurityGroups,
+            //SecurityGroups = userSecurityGroups,
             ApiPermissions = apiPermissions
         };
 
-        return Task.FromResult(result);
+        return result;
+    }
+
+    public Task<IdentitySearchResult> SearchIdentitiesAsync(string searchInput)
+    {
+        // For demo purposes, return empty search results
+        var searchResult = new IdentitySearchResult
+        {
+            Identities = new List<Identity>()
+        };
+
+        return Task.FromResult(searchResult);
     }
 }

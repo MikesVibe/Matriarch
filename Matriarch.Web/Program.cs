@@ -13,7 +13,14 @@ var appSettings = new AppSettings();
 builder.Configuration.Bind(appSettings);
 builder.Services.AddSingleton(appSettings);
 
+// Register HttpClient for services that need it
+builder.Services.AddHttpClient<IResourceGraphService, AzureResourceGraphService>();
+
 // Register custom services for role assignments
+builder.Services.AddScoped<IIdentityService, IdentityService>();
+builder.Services.AddScoped<IGroupManagementService, GroupManagementService>();
+builder.Services.AddScoped<IApiPermissionsService, AzureApiPermissionsService>();
+builder.Services.AddScoped<IResourceGraphService, AzureResourceGraphService>();
 builder.Services.AddScoped<IRoleAssignmentService, AzureRoleAssignmentService>();
 
 var app = builder.Build();

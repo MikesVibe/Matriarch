@@ -11,8 +11,8 @@ public enum IdentityType
 
 public class Identity
 {
-    public string ObjectId { get; set; } = string.Empty;
-    public string ApplicationId { get; set; } = string.Empty;
+    public string ObjectId { get; set; } = string.Empty; // For Service Principals, this is the Enterprise Application ObjectId
+    public string ApplicationId { get; set; } = string.Empty; // ClientId / ApplicationId (AppId)
     public string Email { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public IdentityType Type { get; set; } = IdentityType.User;
@@ -52,4 +52,10 @@ public class IdentityRoleAssignmentResult
     public List<RoleAssignment> DirectRoleAssignments { get; set; } = new();
     public List<SecurityGroup> SecurityGroups { get; set; } = new();
     public List<ApiPermission> ApiPermissions { get; set; } = new();
+}
+
+public class IdentitySearchResult
+{
+    public List<Identity> Identities { get; set; } = new();
+    public bool HasMultipleResults => Identities.Count > 1;
 }

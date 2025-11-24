@@ -17,14 +17,6 @@
             </div>
             <div class="card-body">
                 <div class="row g-3">
-                    <div class="col-md-6">
-                        <label for="dataSource" class="form-label">Data Source:</label>
-                        <select class="form-select" id="dataSource" @bind="dataSource">
-                            <option value="Local">Local Database</option>
-                            <option value="Azure">Azure (Direct)</option>
-                        </select>
-                    </div>
-                    <div class="col-md-6"></div>
                     <div class="col-md-12">
                         <label for="identityInput" class="form-label">Identity (Email, Object ID, Application ID, Group ID, or Name):</label>
                         <input type="text" class="form-control" id="identityInput" @bind="identityInput" placeholder="user@example.com" />
@@ -43,10 +35,6 @@
                             <span>Load Role Assignments</span>
                         }
                     </button>
-                    @if (!string.IsNullOrEmpty(dataSource))
-                    {
-                        <span class="ms-3 text-muted">Using: <strong>@dataSource</strong></span>
-                    }
                 </div>
             </div>
         </div>
@@ -66,6 +54,94 @@
     </div>
 }
 
+@if (searchResult != null && searchResult.HasMultipleResults)
+{
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <div class="card">
+                <div class="card-header bg-warning">
+                    <h5>Multiple Identities Found - Select One</h5>
+                </div>
+                <div class="card-body">
+                    <p class="mb-3">Multiple identities match your search. Please select one from the table below:</p>
+                    <div class="table-responsive">
+                        <table class="table table-striped table-hover">
+                            <thead>
+                                <tr>
+                                    <th>Type</th>
+                                    <th>Name</th>
+                                    <th>Object ID</th>
+                                    <th>Application ID</th>
+                                    <th>Email</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var identity in searchResult.Identities)
+                                {
+                                    <tr class="@(selectedIdentity?.ObjectId == identity.ObjectId ? "table-active" : "")" style="cursor: pointer;" @onclick="@(() => SelectIdentity(identity))">
+                                        <td><span class="badge bg-secondary">@GetIdentityTypeDisplay(identity.Type)</span></td>
+                                        <td>@identity.Name</td>
+                                        <td><code>@identity.ObjectId</code></td>
+                                        <td>
+                                            @if (!string.IsNullOrEmpty(identity.ApplicationId))
+                                            {
+                                                <code>@identity.ApplicationId</code>
+                                            }
+                                            else
+                                            {
+                                                <span class="text-muted">-</span>
+                                            }
+                                        </td>
+                                        <td>
+                                            @if (!string.IsNullOrEmpty(identity.Email))
+                                            {
+                                                @identity.Email
+                                            }
+                                            else
+                                            {
+                                                <span class="text-muted">-</span>
+                                            }
+                                        </td>
+                                        <td>
+                                            <button class="btn btn-sm btn-primary" @onclick="@(() => SelectIdentity(identity))" @onclick:stopPropagation="true">
+                                                @if (selectedIdentity?.ObjectId == identity.ObjectId)
+                                                {
+                                                    <span>✓ Selected</span>
+                                                }
+                                                else
+                                                {
+                                                    <span>Select</span>
+                                                }
+                                            </button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    @if (selectedIdentity != null)
+                    {
+                        <div class="mt-3">
+                            <button class="btn btn-success" @onclick="LoadRoleAssignmentsForSelectedIdentity" disabled="@isLoading">
+                                @if (isLoading)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                                    <span>Loading...</span>
+                                }
+                                else
+                                {
+                                    <span>Load Role Assignments for Selected Identity</span>
+                                }
+                            </button>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 @if (result != null)
 {
     <div class="row mb-4">
@@ -79,34 +155,39 @@
                         <dt class="col-sm-3">Identity Type:</dt>
                         <dd class="col-sm-9">
                             <span class="badge bg-primary">@GetIdentityTypeDisplay(result.Identity.Type)</span>
-                            @if (!string.IsNullOrEmpty(result.Identity.ServicePrincipalType))
-                            {
-                                <span class="ms-2 text-muted">(@result.Identity.ServicePrincipalType)</span>
-                            }
                         </dd>
-                        
+
                         <dt class="col-sm-3">Name:</dt>
                         <dd class="col-sm-9">@result.Identity.Name</dd>
-                        
+
                         @if (result.Identity.Type == IdentityType.User)
                         {
                             <dt class="col-sm-3">Email:</dt>
                             <dd class="col-sm-9">@result.Identity.Email</dd>
                         }
-                        
-                        <dt class="col-sm-3">Object ID:</dt>
-                        <dd class="col-sm-9"><code>@result.Identity.ObjectId</code></dd>
-                        
-                        @if (result.Identity.Type != IdentityType.User && result.Identity.Type != IdentityType.Group && !string.IsNullOrEmpty(result.Identity.ApplicationId))
+
+                        @if (result.Identity.Type == IdentityType.User || result.Identity.Type == IdentityType.Group)
                         {
-                            <dt class="col-sm-3">Application ID:</dt>
-                            <dd class="col-sm-9"><code>@result.Identity.ApplicationId</code></dd>
+                            <dt class="col-sm-3">Object ID:</dt>
+                            <dd class="col-sm-9"><code>@result.Identity.ObjectId</code></dd>
                         }
-                        
-                        @if (!string.IsNullOrEmpty(result.Identity.AppRegistrationId) && (result.Identity.Type == IdentityType.ServicePrincipal || result.Identity.Type == IdentityType.UserAssignedManagedIdentity))
+
+                        @if (result.Identity.Type != IdentityType.User && result.Identity.Type != IdentityType.Group)
                         {
-                            <dt class="col-sm-3">App Registration:</dt>
-                            <dd class="col-sm-9"><code>@result.Identity.AppRegistrationId</code></dd>
+                            @if (!string.IsNullOrEmpty(result.Identity.ApplicationId))
+                            {
+                                <dt class="col-sm-3">ClientId / ApplicationId:</dt>
+                                <dd class="col-sm-9"><code>@result.Identity.ApplicationId</code></dd>
+                            }
+
+                            @if (!string.IsNullOrEmpty(result.Identity.AppRegistrationId))
+                            {
+                                <dt class="col-sm-3">App Registration ObjectId:</dt>
+                                <dd class="col-sm-9"><code>@result.Identity.AppRegistrationId</code></dd>
+                            }
+
+                            <dt class="col-sm-3">Enterprise Application ObjectId:</dt>
+                            <dd class="col-sm-9"><code>@result.Identity.ObjectId</code></dd>
                         }
                     </dl>
                 </div>
@@ -161,12 +242,10 @@
                     <h5>Direct Group Memberships</h5>
                 </div>
                 <div class="card-body">
-                    @if (result.SecurityGroups.Any())
+                    @if (result.SecurityDirectGroups.Any())
                     {
-                        var (directGroups, indirectGroups) = GetDirectAndIndirectGroups(result.SecurityGroups);
-                        
                         <ul class="list-group">
-                            @foreach (var group in directGroups)
+                            @foreach (var group in result.SecurityDirectGroups)
                             {
                                 <li class="list-group-item">
                                     <strong>@group.DisplayName</strong>
@@ -195,30 +274,21 @@
                     <h5>Indirect Group Memberships (via parent groups)</h5>
                 </div>
                 <div class="card-body">
-                    @if (result.SecurityGroups.Any())
+                    @if (result.SecurityIndirectGroups.Any())
                     {
-                        var (directGroups, indirectGroups) = GetDirectAndIndirectGroups(result.SecurityGroups);
-                        
-                        @if (indirectGroups.Any())
-                        {
-                            <ul class="list-group">
-                                @foreach (var group in indirectGroups)
-                                {
-                                    <li class="list-group-item">
-                                        <strong>@group.DisplayName</strong>
-                                        @if (!string.IsNullOrEmpty(group.Description))
-                                        {
-                                            <br />
-                                            <small class="text-muted">@group.Description</small>
-                                        }
-                                    </li>
-                                }
-                            </ul>
-                        }
-                        else
-                        {
-                            <p class="text-muted mb-0">No indirect group memberships.</p>
-                        }
+                        <ul class="list-group">
+                            @foreach (var group in result.SecurityIndirectGroups)
+                            {
+                                <li class="list-group-item">
+                                    <strong>@group.DisplayName</strong>
+                                    @if (!string.IsNullOrEmpty(group.Description))
+                                    {
+                                        <br />
+                                        <small class="text-muted">@group.Description</small>
+                                    }
+                                </li>
+                            }
+                        </ul>
                     }
                     else
                     {
@@ -305,7 +375,7 @@
                     }
                     else
                     {
-                        <p class="text-muted mb-0">No API permissions found (identity may not be a service principal).</p>
+                        <p class="text-muted mb-0">No API permissions found.</p>
                     }
                 </div>
             </div>
@@ -314,11 +384,12 @@
 }
 
 @code {
-    private string dataSource = "Azure";
     private string identityInput = "";
     private bool isLoading = false;
     private IdentityRoleAssignmentResult? result;
     private string? errorMessage;
+    private IdentitySearchResult? searchResult;
+    private Identity? selectedIdentity;
 
     private async Task LoadRoleAssignments()
     {
@@ -330,14 +401,50 @@
         isLoading = true;
         errorMessage = null;
         result = null;
-        
+        searchResult = null;
+        selectedIdentity = null;
+
         try
         {
-            result = await _roleAssignmentService.GetRoleAssignmentsAsync(identityInput);
+            // First, search for identities
+            searchResult = await _roleAssignmentService.SearchIdentitiesAsync(identityInput);
+
+            if (searchResult.Identities.Count == 0)
+            {
+                errorMessage = $"Identity '{identityInput}' could not be found in the tenant. Please verify the input and try again.";
+            }
+            else if (searchResult.Identities.Count == 1)
+            {
+                // Only one result, load role assignments directly
+                selectedIdentity = searchResult.Identities[0];
+                await LoadRoleAssignmentsForSelectedIdentity();
+            }
+            // else: multiple results, show selection table
         }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("Could not resolve identity"))
+        catch (Exception ex)
         {
-            errorMessage = $"Identity '{identityInput}' could not be found in the tenant. Please verify the input and try again.";
+            errorMessage = $"An error occurred while searching for identities: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task LoadRoleAssignmentsForSelectedIdentity()
+    {
+        if (selectedIdentity == null)
+        {
+            return;
+        }
+
+        isLoading = true;
+        errorMessage = null;
+        result = null;
+
+        try
+        {
+            result = await _roleAssignmentService.GetRoleAssignmentsAsync(selectedIdentity);
         }
         catch (Exception ex)
         {
@@ -349,39 +456,9 @@
         }
     }
 
-    private (List<SecurityGroup> directGroups, List<SecurityGroup> indirectGroups) GetDirectAndIndirectGroups(List<SecurityGroup> groups)
+    private void SelectIdentity(Identity identity)
     {
-        var directGroups = new List<SecurityGroup>();
-        var indirectGroups = new List<SecurityGroup>();
-        var processedIds = new HashSet<string>();
-        
-        // Add direct groups (top-level groups the user is a member of)
-        foreach (var group in groups)
-        {
-            directGroups.Add(group);
-            processedIds.Add(group.Id);
-        }
-        
-        // Recursively collect all indirect groups (parent groups)
-        void CollectParentGroups(SecurityGroup group)
-        {
-            foreach (var parentGroup in group.ParentGroups)
-            {
-                if (!processedIds.Contains(parentGroup.Id))
-                {
-                    processedIds.Add(parentGroup.Id);
-                    indirectGroups.Add(parentGroup);
-                    CollectParentGroups(parentGroup);
-                }
-            }
-        }
-        
-        foreach (var group in groups)
-        {
-            CollectParentGroups(group);
-        }
-        
-        return (directGroups, indirectGroups);
+        selectedIdentity = identity;
     }
 
     private string GetIdentityTypeDisplay(IdentityType identityType)
@@ -406,7 +483,7 @@
 
         var allRoleAssignments = new List<RoleAssignment>();
         var processedIds = new HashSet<string>();
-        
+
         // Collect role assignments from all groups
         void CollectRoleAssignments(SecurityGroup group)
         {
@@ -420,18 +497,17 @@
                     allRoleAssignments.Add(ra);
                 }
             }
-            
-            foreach (var parentGroup in group.ParentGroups)
-            {
-                CollectRoleAssignments(parentGroup);
-            }
         }
-        
-        foreach (var group in result.SecurityGroups)
+
+        foreach (var group in result.SecurityDirectGroups)
         {
             CollectRoleAssignments(group);
         }
-        
+        foreach (var group in result.SecurityIndirectGroups)
+        {
+            CollectRoleAssignments(group);
+        }
+
         return allRoleAssignments;
     }
 }

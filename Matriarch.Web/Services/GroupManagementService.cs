@@ -1,0 +1,226 @@
+using Azure.Identity;
+using Microsoft.Extensions.Logging;
+using Microsoft.Graph.Beta;
+using Microsoft.Graph.Beta.Models;
+using Matriarch.Web.Models;
+using Matriarch.Web.Configuration;
+
+namespace Matriarch.Web.Services;
+
+public interface IGroupManagementService
+{
+    Task<List<string>> GetGroupMembershipsAsync(Models.Identity identity);
+    Task<(List<string> parentGroupIds, Dictionary<string, GroupInfo> groupInfoMap)> GetParentGroupsAsync(List<string> directGroupIds);
+    List<SecurityGroup> BuildSecurityGroupsWithPreFetchedData(List<string> directGroupIds, Dictionary<string, GroupInfo> groupInfoMap, List<AzureRoleAssignmentDto> roleAssignments);
+}
+
+public class GroupInfo
+{
+    public string Id { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public List<string> ParentGroupIds { get; set; } = new();
+}
+
+public class AzureRoleAssignmentDto
+{
+    public string Id { get; set; } = string.Empty;
+    public string PrincipalId { get; set; } = string.Empty;
+    public string PrincipalType { get; set; } = string.Empty;
+    public string RoleDefinitionId { get; set; } = string.Empty;
+    public string RoleName { get; set; } = string.Empty;
+    public string Scope { get; set; } = string.Empty;
+}
+
+public class GroupManagementService : IGroupManagementService
+{
+    private readonly ILogger<GroupManagementService> _logger;
+    private readonly GraphServiceClient _graphClient;
+    private const int MaxGraphPageSize = 999;
+
+    public GroupManagementService(AppSettings settings, ILogger<GroupManagementService> logger)
+    {
+        _logger = logger;
+
+        // Use ClientSecretCredential for authentication
+        var credential = new ClientSecretCredential(
+            settings.Azure.TenantId,
+            settings.Azure.ClientId,
+            settings.Azure.ClientSecret);
+
+        // Initialize Graph client for Entra ID operations
+        _graphClient = new GraphServiceClient(credential);
+    }
+
+    public async Task<List<string>> GetGroupMembershipsAsync(Models.Identity identity)
+    {
+        var groupIds = new List<string>();
+
+        try
+        {
+            DirectoryObjectCollectionResponse? memberOfPage = identity.Type switch
+            {
+                IdentityType.User => await _graphClient.Users[identity.ObjectId].MemberOf.GetAsync(config =>
+                {
+                    config.QueryParameters.Top = MaxGraphPageSize;
+                }),
+                IdentityType.ServicePrincipal or 
+                IdentityType.UserAssignedManagedIdentity or 
+                IdentityType.SystemAssignedManagedIdentity => await _graphClient.ServicePrincipals[identity.ObjectId].MemberOf.GetAsync(config =>
+                {
+                    config.QueryParameters.Top = MaxGraphPageSize;
+                }),
+                IdentityType.Group => await HandleGroupIdentityAsync(identity.ObjectId, groupIds),
+                _ => throw new InvalidOperationException($"Unsupported identity type: {identity.Type}")
+            };
+
+            if (memberOfPage?.Value != null)
+            {
+                foreach (var directoryObject in memberOfPage.Value)
+                {
+                    if (directoryObject is Group group && group.SecurityEnabled == true && !string.IsNullOrEmpty(group.Id))
+                    {
+                        groupIds.Add(group.Id);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching group memberships for identity {ObjectId} of type {IdentityType}", 
+                identity.ObjectId, identity.Type);
+            throw;
+        }
+
+        return groupIds;
+    }
+
+    private async Task<DirectoryObjectCollectionResponse?> HandleGroupIdentityAsync(string groupId, List<string> groupIds)
+    {
+        // For a group identity, verify it exists and is a security group
+        var group = await _graphClient.Groups[groupId].GetAsync();
+        if (group != null && group.SecurityEnabled == true)
+        {
+            // For a group, we treat it as being "member" of itself for role assignment purposes
+            groupIds.Add(groupId);
+            _logger.LogInformation("Identity is a group, will fetch its role assignments");
+        }
+        // Return null as groups don't have memberOf in this context
+        return null;
+    }
+
+    public async Task<(List<string> parentGroupIds, Dictionary<string, GroupInfo> groupInfoMap)> GetParentGroupsAsync(List<string> directGroupIds)
+    {
+        var allGroupIds = new HashSet<string>(directGroupIds);
+        var groupsToProcess = new Queue<string>(directGroupIds);
+        var processedGroups = new HashSet<string>();
+        var groupInfoMap = new Dictionary<string, GroupInfo>();
+
+        while (groupsToProcess.Count > 0)
+        {
+            var currentGroupId = groupsToProcess.Dequeue();
+            
+            // Skip if already processed (circular reference protection)
+            if (processedGroups.Contains(currentGroupId))
+            {
+                continue;
+            }
+            
+            processedGroups.Add(currentGroupId);
+
+            try
+            {
+                // Get group details and parent groups in a single operation
+                var group = await _graphClient.Groups[currentGroupId].GetAsync();
+                var memberOfPage = await _graphClient.Groups[currentGroupId].MemberOf.GetAsync(config =>
+                {
+                    config.QueryParameters.Top = MaxGraphPageSize;
+                });
+
+                var parentGroupIds = new List<string>();
+                if (memberOfPage?.Value != null)
+                {
+                    foreach (var directoryObject in memberOfPage.Value)
+                    {
+                        if (directoryObject is Group parentGroup && parentGroup.SecurityEnabled == true && !string.IsNullOrEmpty(parentGroup.Id))
+                        {
+                            parentGroupIds.Add(parentGroup.Id);
+                            if (allGroupIds.Add(parentGroup.Id))
+                            {
+                                // New group found, add to queue for processing
+                                groupsToProcess.Enqueue(parentGroup.Id);
+                            }
+                        }
+                    }
+                }
+
+                // Store group information
+                groupInfoMap[currentGroupId] = new GroupInfo
+                {
+                    Id = group?.Id ?? currentGroupId,
+                    DisplayName = group?.DisplayName ?? string.Empty,
+                    Description = group?.Description ?? string.Empty,
+                    ParentGroupIds = parentGroupIds
+                };
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error fetching parent groups for {GroupId}", currentGroupId);
+            }
+        }
+
+        return (allGroupIds.Except(directGroupIds).ToList(), groupInfoMap);
+    }
+
+    public List<SecurityGroup> BuildSecurityGroupsWithPreFetchedData(
+        List<string> groupIds,
+        Dictionary<string, GroupInfo> groupInfoMap,
+        List<AzureRoleAssignmentDto> roleAssignments)
+    {
+        var securityGroups = new List<SecurityGroup>();
+
+        foreach (var groupId in groupIds)
+        {
+            var group = BuildSecurityGroupWithPreFetchedDataMiki(groupId, groupInfoMap, roleAssignments);
+            if (group != null)
+            {
+                securityGroups.Add(group);
+            }
+        }
+
+        return securityGroups;
+    }
+
+    private SecurityGroup? BuildSecurityGroupWithPreFetchedDataMiki(
+      string groupId,
+      Dictionary<string, GroupInfo> groupInfoMap,
+      List<AzureRoleAssignmentDto> allRoleAssignments)
+    {
+        // Check if we have info for this group
+        if (!groupInfoMap.TryGetValue(groupId, out var groupInfo))
+        {
+            _logger.LogWarning("Group info not found for {GroupId}", groupId);
+            return null;
+        }
+
+        // Get role assignments for this group
+        var groupRoleAssignments = allRoleAssignments
+            .Where(ra => ra.PrincipalId == groupId)
+            .Select(ra => new Models.RoleAssignment
+            {
+                Id = ra.Id,
+                RoleName = ra.RoleName,
+                Scope = ra.Scope,
+                AssignedTo = groupInfo.DisplayName
+            })
+            .ToList();
+
+        return new SecurityGroup
+        {
+            Id = groupInfo.Id,
+            DisplayName = groupInfo.DisplayName,
+            Description = groupInfo.Description,
+            RoleAssignments = groupRoleAssignments,
+        };
+    }
+}
