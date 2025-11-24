@@ -403,6 +403,9 @@ public class IdentityService : IIdentityService
 
     private IdentityType DetermineServicePrincipalType(string? servicePrincipalType, IEnumerable<string>? alternativeNames)
     {
+        const string SystemAssignedIndicator = "isExplicit=False";
+        const string UserAssignedIndicator = "isExplicit=True";
+
         if (servicePrincipalType != "ManagedIdentity")
         {
             // For non-managed identity service principals, treat them all as regular service principals
@@ -414,21 +417,29 @@ public class IdentityService : IIdentityService
         // User-Assigned MI: alternativeNames contains "isExplicit=True"
         if (alternativeNames != null)
         {
-            foreach (var altName in alternativeNames)
+            var altNamesList = alternativeNames.ToList();
+            foreach (var altName in altNamesList)
             {
-                if (altName.Contains("isExplicit=False", StringComparison.OrdinalIgnoreCase))
+                if (altName.Contains(SystemAssignedIndicator, StringComparison.OrdinalIgnoreCase))
                 {
                     return IdentityType.SystemAssignedManagedIdentity;
                 }
-                else if (altName.Contains("isExplicit=True", StringComparison.OrdinalIgnoreCase))
+                else if (altName.Contains(UserAssignedIndicator, StringComparison.OrdinalIgnoreCase))
                 {
                     return IdentityType.UserAssignedManagedIdentity;
                 }
             }
+
+            // If we couldn't determine the type, log the alternativeNames for debugging
+            _logger.LogWarning("Unable to determine managed identity type from {Count} alternativeNames, defaulting to User-Assigned. AlternativeNames: {AltNames}",
+                altNamesList.Count, string.Join("; ", altNamesList));
+        }
+        else
+        {
+            _logger.LogWarning("Unable to determine managed identity type - no alternativeNames provided, defaulting to User-Assigned");
         }
 
         // Default to User-Assigned if we can't determine (more common case)
-        _logger.LogWarning("Unable to determine managed identity type from alternativeNames, defaulting to User-Assigned");
         return IdentityType.UserAssignedManagedIdentity;
     }
 
