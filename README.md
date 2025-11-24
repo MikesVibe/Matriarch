@@ -137,5 +137,3 @@ All data is queried in real-time from Azure - there is no local database or cach
 ## License
 
 MIT
-
-MIT

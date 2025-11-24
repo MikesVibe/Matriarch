@@ -490,7 +490,8 @@ public class IdentityService : IIdentityService
     {
         if (servicePrincipalType != "ManagedIdentity")
         {
-            return servicePrincipalType == "Application" ? IdentityType.ServicePrincipal : IdentityType.ServicePrincipal;
+            // For non-managed identity service principals, treat them all as regular service principals
+            return IdentityType.ServicePrincipal;
         }
 
         // For Managed Identities, check alternativeNames to distinguish System vs User Assigned
@@ -541,9 +542,7 @@ public class IdentityService : IIdentityService
                         }
                     }
 
-                    // If we found subscription ID, we can try to get the subscription name
-                    // Note: This would require Azure Resource Manager API call, which we'll skip for now
-                    // and just set subscription name to null or same as ID
+                    // If we found subscription ID, log the extracted information
                     if (!string.IsNullOrEmpty(identity.SubscriptionId))
                     {
                         _logger.LogInformation("Extracted MI resource info - SubscriptionId: {SubId}, ResourceGroup: {RG}", 
