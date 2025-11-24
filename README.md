@@ -1,46 +1,49 @@
 # Matriarch
 
-A .NET solution for managing and visualizing Azure role assignments and security relationships.
+A .NET Blazor web application for viewing Azure role assignments and security relationships in real-time.
 
 ## Projects
 
-### Matriarch
-A .NET 10 console application that fetches data from Azure (Entra ID and Azure Resource Manager) and stores it in Neo4j graph database and SQLite database.
-
 ### Matriarch.Web
-A Blazor Server web application that provides an interactive UI for viewing role assignments and security group memberships for Azure identities.
+A Blazor Server web application that provides an interactive UI for viewing role assignments, API permissions, and security group memberships for Azure identities. The application queries Azure Entra ID and Azure Resource Manager in real-time to display current information.
+
+### Matriarch.Tests
+Unit and integration tests for the Matriarch solution.
 
 ## Features
 
-- **Fetches Azure Data:**
-  - Role assignments from Azure Resource Graph for the entire directory
-  - Enterprise applications (Service Principals) from Microsoft Graph
-  - App registrations with their federated credentials from Microsoft Graph
-  - Entra security groups from Microsoft Graph
+- **Real-time Azure Identity Lookup:**
+  - Search by email, Object ID, Application ID, or display name
+  - Auto-detection of identity type (User, Group, Service Principal, Managed Identity)
+  - Support for both System-Assigned and User-Assigned Managed Identities
 
-- **Creates Graph Relationships:**
-  - App Registration → Enterprise Application (via Service Principal)
-  - Enterprise Application → Role Assignments
-  - Enterprise Application → Security Group memberships
-  - Security Group → Role Assignments
-  - App Registration → Federated Credentials
+- **Comprehensive Identity Information:**
+  - Direct RBAC role assignments from Azure Resource Graph
+  - Security group memberships (both direct and indirect)
+  - Role assignments inherited through group memberships
+  - API permissions for Service Principals and Managed Identities
+  - Managed Identity resource details (Subscription, Resource Group)
+
+- **Interactive Web Interface:**
+  - Clean, modern UI built with Blazor Server
+  - Real-time data queries from Azure
+  - Support for multiple identity search results
+  - Detailed role assignment scope information
 
 ## Prerequisites
 
 - .NET 10 SDK
-- Neo4j database (local or cloud instance) - optional, for Matriarch console app
-- SQLite - automatically created by Matriarch console app
-- Azure AD Service Principal with the following permissions (for Matriarch console app):
+- Azure Service Principal or App Registration with the following permissions:
   - **Microsoft Graph API:**
-    - `Application.Read.All`
-    - `Directory.Read.All`
-    - `GroupMember.Read.All`
-  - **Azure Resource Graph:**
-    - Access to query role assignments across the directory (subscription-level Reader role recommended)
+    - `Application.Read.All` - Read all applications and service principals
+    - `Directory.Read.All` - Read directory data
+    - `GroupMember.Read.All` - Read group memberships
+  - **Azure RBAC:**
+    - Reader role at the subscription or management group level to query role assignments
 
 ## Configuration
 
-Update `appsettings.json` with your credentials:
+Create an `appsettings.json` file in the `Matriarch.Web` directory with your Azure credentials:
 
 ```json
 {
@@ -50,13 +53,11 @@ Update `appsettings.json` with your credentials:
     "ClientId": "your-client-id",
     "ClientSecret": "your-client-secret"
   },
-  "Neo4j": {
-    "Uri": "bolt://localhost:7687",
-    "Username": "neo4j",
-    "Password": "your-neo4j-password"
-  },
-  "Sqlite": {
-    "DatabasePath": "matriarch.db"
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
   }
 }
 ```
@@ -66,38 +67,21 @@ Alternatively, you can use environment variables:
 - `Azure__SubscriptionId`
 - `Azure__ClientId`
 - `Azure__ClientSecret`
-- `Neo4j__Uri`
-- `Neo4j__Username`
-- `Neo4j__Password`
-- `Sqlite__DatabasePath`
 
 ## Building
 
-Build the entire solution:
+Build the solution:
 ```bash
 dotnet build Matriarch.sln
 ```
 
-Or build individual projects:
-```bash
-cd Matriarch
-dotnet build
-```
-
+Or build the web application directly:
 ```bash
 cd Matriarch.Web
 dotnet build
 ```
 
 ## Running
-
-### Matriarch Console Application
-
-Using .NET CLI:
-```bash
-cd Matriarch
-dotnet run
-```
 
 ### Matriarch.Web (Blazor Application)
 
@@ -107,123 +91,51 @@ cd Matriarch.Web
 dotnet run
 ```
 
-Then open your browser and navigate to `http://localhost:5196` (or the URL shown in the console).
+Then open your browser and navigate to the URL shown in the console (typically `http://localhost:5000` or `https://localhost:5001`).
 
-**Features:**
-- View role assignments for Azure identities
-- Input fields for Object ID, Application ID, Email, and Name
-- Display direct role assignments
-- Show security group memberships
-- Hierarchically display parent security group role assignments
-- Currently uses mock data for demonstration
+**Using the Application:**
+1. Enter an identity search term in the input field:
+   - Email address (e.g., `user@example.com`)
+   - Object ID (GUID format)
+   - Application ID / Client ID (GUID format)
+   - Display name (e.g., `John Doe` or `MyApp`)
+2. Click "Load Role Assignments"
+3. If multiple identities match your search, select the correct one from the table
+4. View the comprehensive results:
+   - Identity type and details (including Managed Identity resource information)
+   - Direct role assignments
+   - Group memberships (direct and indirect)
+   - Role assignments inherited through groups
+   - API permissions (for Service Principals and Managed Identities)
 
-### Matriarch Console - Using Docker
+## Supported Identity Types
 
-Build the Docker image:
-```bash
-cd Matriarch
-docker build -t matriarch:latest .
-```
+The application supports querying and displaying information for:
 
-Run the container:
-```bash
-docker run --rm \
-  -e Azure__TenantId="your-tenant-id" \
-  -e Azure__SubscriptionId="your-subscription-id" \
-  -e Azure__ClientId="your-client-id" \
-  -e Azure__ClientSecret="your-client-secret" \
-  -e Neo4j__Uri="bolt://host.docker.internal:7687" \
-  -e Neo4j__Username="neo4j" \
-  -e Neo4j__Password="your-password" \
-  matriarch:latest
-```
+- **Users**: Azure AD/Entra ID users
+- **Security Groups**: Azure AD/Entra ID security-enabled groups
+- **Service Principals**: Azure AD App Registrations with Enterprise Applications
+- **Managed Identities**:
+  - **System-Assigned Managed Identities**: Automatically created and tied to an Azure resource
+  - **User-Assigned Managed Identities**: Standalone Azure resources that can be assigned to multiple Azure resources
 
-### Matriarch Console - Using Docker Compose
+For Managed Identities, the application displays:
+- Subscription ID and name
+- Resource Group
+- The distinction between System-Assigned and User-Assigned types
 
-Create a `.env` file in the root directory with your Azure credentials:
-```env
-AZURE_TENANT_ID=your-tenant-id
-AZURE_SUBSCRIPTION_ID=your-subscription-id
-AZURE_CLIENT_ID=your-client-id
-AZURE_CLIENT_SECRET=your-client-secret
-```
+## Architecture
 
-Start both Neo4j and Matriarch:
-```bash
-docker-compose up
-```
+The application uses:
+- **Blazor Server** for the interactive web UI
+- **Microsoft Graph SDK** for querying Entra ID (users, groups, service principals, applications)
+- **Azure Resource Graph SDK** for querying RBAC role assignments across Azure subscriptions
+- **Azure.Identity** for authentication with Azure services
 
-Access Neo4j Browser at `http://localhost:7474` (username: `neo4j`, password: `password`)
-
-## SQLite Database
-
-The Matriarch console application now also stores data in a local SQLite database for efficient querying and analysis. The database includes:
-
-### Tables
-- **AppRegistrations**: Azure AD App Registrations
-- **EnterpriseApplications**: Service Principals
-- **SecurityGroups**: Entra Security Groups
-- **RoleAssignments**: Azure RBAC Role Assignments
-- **FederatedCredentials**: Federated Identity Credentials
-- **GroupMemberships**: Tracks group membership relationships (including circular references)
-
-### Circular Reference Handling
-The SQLite service includes built-in protection against infinite loops when traversing group membership hierarchies. For example, if:
-- Group A is a member of Group B
-- Group B is a member of Group C
-- Group C is a member of Group A (circular reference)
-
-The service will detect the circular reference and stop traversal, preventing infinite loops while still returning all accessible role assignments.
-
-## Graph Schema
-
-The application creates the following nodes and relationships in Neo4j:
-
-### Nodes
-- **AppRegistration**: Azure AD App Registrations
-  - Properties: `id`, `appId`, `displayName`
-- **EnterpriseApp**: Service Principals
-  - Properties: `id`, `appId`, `displayName`
-- **SecurityGroup**: Entra Security Groups
-  - Properties: `id`, `displayName`, `description`
-- **RoleAssignment**: Azure RBAC Role Assignments
-  - Properties: `id`, `principalId`, `principalType`, `roleDefinitionId`, `roleName`, `scope`
-- **FederatedCredential**: Federated Identity Credentials
-  - Properties: `id`, `name`, `issuer`, `subject`, `audiences`
-
-### Relationships
-- `(AppRegistration)-[:HAS_SERVICE_PRINCIPAL]->(EnterpriseApp)`
-- `(AppRegistration)-[:HAS_FEDERATED_CREDENTIAL]->(FederatedCredential)`
-- `(EnterpriseApp)-[:HAS_ROLE_ASSIGNMENT]->(RoleAssignment)`
-- `(EnterpriseApp)-[:MEMBER_OF]->(SecurityGroup)`
-- `(SecurityGroup)-[:HAS_ROLE_ASSIGNMENT]->(RoleAssignment)`
-
-## Example Cypher Queries
-
-### Find all role assignments for an enterprise application
-```cypher
-MATCH (e:EnterpriseApp {displayName: 'MyApp'})-[:HAS_ROLE_ASSIGNMENT]->(r:RoleAssignment)
-RETURN e.displayName, r.roleName, r.scope
-```
-
-### Find all groups an enterprise application is a member of
-```cypher
-MATCH (e:EnterpriseApp)-[:MEMBER_OF]->(g:SecurityGroup)
-RETURN e.displayName, g.displayName
-```
-
-### Find app registrations with federated credentials
-```cypher
-MATCH (a:AppRegistration)-[:HAS_FEDERATED_CREDENTIAL]->(f:FederatedCredential)
-RETURN a.displayName, f.name, f.issuer, f.subject
-```
-
-### Find the complete path from app registration to role assignments
-```cypher
-MATCH path = (a:AppRegistration)-[:HAS_SERVICE_PRINCIPAL]->(e:EnterpriseApp)-[:HAS_ROLE_ASSIGNMENT]->(r:RoleAssignment)
-RETURN path
-```
+All data is queried in real-time from Azure - there is no local database or caching.
 
 ## License
+
+MIT
 
 MIT

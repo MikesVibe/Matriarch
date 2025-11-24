@@ -18,6 +18,10 @@ public class Identity
     public IdentityType Type { get; set; } = IdentityType.User;
     public string? ServicePrincipalType { get; set; } // For SP: "Application", "ManagedIdentity"
     public string? AppRegistrationId { get; set; } // ObjectId of the linked App Registration (for SP)
+    // Managed Identity specific properties
+    public string? ResourceGroup { get; set; } // Resource group for Managed Identities
+    public string? SubscriptionId { get; set; } // Subscription ID for Managed Identities
+    public string? SubscriptionName { get; set; } // Subscription display name for Managed Identities
 }
 
 public class RoleAssignment

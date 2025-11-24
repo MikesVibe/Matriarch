@@ -188,6 +188,27 @@
 
                             <dt class="col-sm-3">Enterprise Application ObjectId:</dt>
                             <dd class="col-sm-9"><code>@result.Identity.ObjectId</code></dd>
+
+                            @if (result.Identity.Type == IdentityType.SystemAssignedManagedIdentity || result.Identity.Type == IdentityType.UserAssignedManagedIdentity)
+                            {
+                                @if (!string.IsNullOrEmpty(result.Identity.SubscriptionId))
+                                {
+                                    <dt class="col-sm-3">Subscription ID:</dt>
+                                    <dd class="col-sm-9"><code>@result.Identity.SubscriptionId</code></dd>
+                                }
+
+                                @if (!string.IsNullOrEmpty(result.Identity.SubscriptionName))
+                                {
+                                    <dt class="col-sm-3">Subscription:</dt>
+                                    <dd class="col-sm-9">@result.Identity.SubscriptionName</dd>
+                                }
+
+                                @if (!string.IsNullOrEmpty(result.Identity.ResourceGroup))
+                                {
+                                    <dt class="col-sm-3">Resource Group:</dt>
+                                    <dd class="col-sm-9">@result.Identity.ResourceGroup</dd>
+                                }
+                            }
                         }
                     </dl>
                 </div>
