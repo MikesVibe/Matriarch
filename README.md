@@ -120,7 +120,7 @@ The application supports querying and displaying information for:
   - **User-Assigned Managed Identities**: Standalone Azure resources that can be assigned to multiple Azure resources
 
 For Managed Identities, the application displays:
-- Subscription ID and name
+- Subscription ID
 - Resource Group
 - The distinction between System-Assigned and User-Assigned types
 
