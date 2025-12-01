@@ -124,18 +124,8 @@ public class IdentityService : IIdentityService
             {
                 foreach (var sp in sps.Value)
                 {
-                    var identityType = DetermineServicePrincipalType(sp.ServicePrincipalType);
-                    var appRegistrationId = await GetAppRegistrationObjectIdAsync(sp.AppId);
-                    identities.Add(new SharedIdentity
-                    {
-                        ObjectId = sp.Id ?? "",
-                        ApplicationId = sp.AppId ?? "",
-                        Email = "",
-                        Name = sp.DisplayName ?? "",
-                        Type = identityType,
-                        ServicePrincipalType = sp.ServicePrincipalType,
-                        AppRegistrationId = appRegistrationId
-                    });
+                    var identity = await CreateIdentityFromServicePrincipalAsync(sp);
+                    identities.Add(identity);
                 }
             }
         }
@@ -216,18 +206,7 @@ public class IdentityService : IIdentityService
                     else if (directoryObject is ServicePrincipal sp)
                     {
                         _logger.LogInformation("Found Service Principal by ObjectId: {ObjectId}", identityInput);
-                        var identityType = DetermineServicePrincipalType(sp.ServicePrincipalType);
-                        var appRegistrationId = await GetAppRegistrationObjectIdAsync(sp.AppId);
-                        return new SharedIdentity
-                        {
-                            ObjectId = sp.Id ?? identityInput,
-                            ApplicationId = sp.AppId ?? "",
-                            Email = "",
-                            Name = sp.DisplayName ?? "",
-                            Type = identityType,
-                            ServicePrincipalType = sp.ServicePrincipalType,
-                            AppRegistrationId = appRegistrationId
-                        };
+                        return await CreateIdentityFromServicePrincipalAsync(sp);
                     }
                     else if (directoryObject is Microsoft.Graph.Beta.Models.Application app)
                     {
@@ -246,17 +225,15 @@ public class IdentityService : IIdentityService
                             var servicePrincipal = sps?.Value?.FirstOrDefault();
                             if (servicePrincipal != null)
                             {
-                                var identityType = DetermineServicePrincipalType(servicePrincipal.ServicePrincipalType);
-                                return new SharedIdentity
+                                var identity = await CreateIdentityFromServicePrincipalAsync(servicePrincipal);
+                                // Override the AppRegistrationId since we know it from the App object
+                                identity.AppRegistrationId = app.Id;
+                                // Also ensure the name is set correctly
+                                if (string.IsNullOrEmpty(identity.Name))
                                 {
-                                    ObjectId = servicePrincipal.Id ?? "",
-                                    ApplicationId = servicePrincipal.AppId ?? app.AppId,
-                                    Email = "",
-                                    Name = servicePrincipal.DisplayName ?? app.DisplayName ?? "",
-                                    Type = identityType,
-                                    ServicePrincipalType = servicePrincipal.ServicePrincipalType,
-                                    AppRegistrationId = app.Id
-                                };
+                                    identity.Name = app.DisplayName ?? "";
+                                }
+                                return identity;
                             }
                             else
                             {
@@ -301,18 +278,7 @@ public class IdentityService : IIdentityService
                 if (sp != null)
                 {
                     _logger.LogInformation("Found Enterprise Application by Application ID: {AppId}", identityInput);
-                    var identityType = DetermineServicePrincipalType(sp.ServicePrincipalType);
-                    var appRegistrationId = await GetAppRegistrationObjectIdAsync(sp.AppId);
-                    return new SharedIdentity
-                    {
-                        ObjectId = sp.Id ?? "",
-                        ApplicationId = sp.AppId ?? identityInput,
-                        Email = "",
-                        Name = sp.DisplayName ?? "",
-                        Type = identityType,
-                        ServicePrincipalType = sp.ServicePrincipalType,
-                        AppRegistrationId = appRegistrationId
-                    };
+                    return await CreateIdentityFromServicePrincipalAsync(sp);
                 }
             }
             catch (Exception ex)
@@ -393,18 +359,7 @@ public class IdentityService : IIdentityService
                 var sp = sps?.Value?.FirstOrDefault();
                 if (sp != null)
                 {
-                    var identityType = DetermineServicePrincipalType(sp.ServicePrincipalType);
-                    var appRegistrationId = await GetAppRegistrationObjectIdAsync(sp.AppId);
-                    return new SharedIdentity
-                    {
-                        ObjectId = sp.Id ?? "",
-                        ApplicationId = sp.AppId ?? "",
-                        Email = "",
-                        Name = sp.DisplayName ?? identityInput,
-                        Type = identityType,
-                        ServicePrincipalType = sp.ServicePrincipalType,
-                        AppRegistrationId = appRegistrationId
-                    };
+                    return await CreateIdentityFromServicePrincipalAsync(sp);
                 }
             }
             catch (Exception ex)
@@ -446,14 +401,89 @@ public class IdentityService : IIdentityService
         return null;
     }
 
-    private static IdentityType DetermineServicePrincipalType(string? servicePrincipalType)
+    private IdentityType DetermineServicePrincipalType(string? servicePrincipalType, IEnumerable<string>? alternativeNames)
     {
-        return servicePrincipalType switch
+        const string SystemAssignedIndicator = "isExplicit=False";
+        const string UserAssignedIndicator = "isExplicit=True";
+
+        if (servicePrincipalType != "ManagedIdentity")
         {
-            "ManagedIdentity" => IdentityType.UserAssignedManagedIdentity,
-            "Application" => IdentityType.ServicePrincipal,
-            _ => IdentityType.ServicePrincipal
-        };
+            // For non-managed identity service principals, treat them all as regular service principals
+            return IdentityType.ServicePrincipal;
+        }
+
+        // For Managed Identities, check alternativeNames to distinguish System vs User Assigned
+        // System-Assigned MI: alternativeNames contains "isExplicit=False"
+        // User-Assigned MI: alternativeNames contains "isExplicit=True"
+        if (alternativeNames != null)
+        {
+            var altNamesList = alternativeNames.ToList();
+            foreach (var altName in altNamesList)
+            {
+                if (altName.Contains(SystemAssignedIndicator, StringComparison.OrdinalIgnoreCase))
+                {
+                    return IdentityType.SystemAssignedManagedIdentity;
+                }
+                else if (altName.Contains(UserAssignedIndicator, StringComparison.OrdinalIgnoreCase))
+                {
+                    return IdentityType.UserAssignedManagedIdentity;
+                }
+            }
+
+            // If we couldn't determine the type, log the alternativeNames for debugging
+            _logger.LogWarning("Unable to determine managed identity type from {Count} alternativeNames, defaulting to User-Assigned. AlternativeNames: {AltNames}",
+                altNamesList.Count, string.Join("; ", altNamesList));
+        }
+        else
+        {
+            _logger.LogWarning("Unable to determine managed identity type - no alternativeNames provided, defaulting to User-Assigned");
+        }
+
+        // Default to User-Assigned if we can't determine (more common case)
+        return IdentityType.UserAssignedManagedIdentity;
+    }
+
+    private void ExtractManagedIdentityResourceInfo(IEnumerable<string> alternativeNames, SharedIdentity identity)
+    {
+        // alternativeNames for managed identities contain resource information in the format:
+        // Example: "/subscriptions/{subscriptionId}/resourcegroups/{resourceGroup}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/{name}"
+        // or for system-assigned: "/subscriptions/{subscriptionId}/resourcegroups/{resourceGroup}/providers/Microsoft.Compute/virtualMachines/{vmName}"
+        
+        foreach (var altName in alternativeNames)
+        {
+            if (altName.StartsWith("/subscriptions/", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    var parts = altName.Split('/', StringSplitOptions.RemoveEmptyEntries);
+                    
+                    for (int i = 0; i < parts.Length; i++)
+                    {
+                        if (parts[i].Equals("subscriptions", StringComparison.OrdinalIgnoreCase) && i + 1 < parts.Length)
+                        {
+                            identity.SubscriptionId = parts[i + 1];
+                        }
+                        else if (parts[i].Equals("resourcegroups", StringComparison.OrdinalIgnoreCase) && i + 1 < parts.Length)
+                        {
+                            identity.ResourceGroup = parts[i + 1];
+                        }
+                    }
+
+                    // If we found subscription ID, we've extracted what we need from this alternativeName
+                    // (resource group may or may not be present in the same path)
+                    if (!string.IsNullOrEmpty(identity.SubscriptionId))
+                    {
+                        _logger.LogInformation("Extracted MI resource info - SubscriptionId: {SubId}, ResourceGroup: {RG}", 
+                            identity.SubscriptionId, identity.ResourceGroup ?? "N/A");
+                        break; // Stop processing additional alternativeNames
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error parsing alternativeName: {AltName}", altName);
+                }
+            }
+        }
     }
 
     private async Task<string?> GetAppRegistrationObjectIdAsync(string? appId)
@@ -491,5 +521,29 @@ public class IdentityService : IIdentityService
     {
         // Escape single quotes to prevent OData filter injection
         return value.Replace("'", "''");
+    }
+
+    private async Task<SharedIdentity> CreateIdentityFromServicePrincipalAsync(ServicePrincipal sp)
+    {
+        var identityType = DetermineServicePrincipalType(sp.ServicePrincipalType, sp.AlternativeNames);
+        var appRegistrationId = await GetAppRegistrationObjectIdAsync(sp.AppId);
+        var identity = new SharedIdentity
+        {
+            ObjectId = sp.Id ?? "",
+            ApplicationId = sp.AppId ?? "",
+            Email = "",
+            Name = sp.DisplayName ?? "",
+            Type = identityType,
+            ServicePrincipalType = sp.ServicePrincipalType,
+            AppRegistrationId = appRegistrationId
+        };
+        
+        // For Managed Identities, extract resource information from alternativeNames
+        if (sp.ServicePrincipalType == "ManagedIdentity" && sp.AlternativeNames != null)
+        {
+            ExtractManagedIdentityResourceInfo(sp.AlternativeNames, identity);
+        }
+        
+        return identity;
     }
 }
