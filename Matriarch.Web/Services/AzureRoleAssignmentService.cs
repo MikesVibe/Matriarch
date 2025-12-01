@@ -42,6 +42,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             // Step 2: Fetch role assignments for principal and ALL groups (direct and indirect)
             var principalIds = new List<string> { identity.ObjectId };
             principalIds.AddRange(parentGroupIds);
+            principalIds.AddRange(directGroupIds);
             
             var roleAssignments = await _resourceGraphService.FetchRoleAssignmentsForPrincipalsAsync(principalIds);
             
