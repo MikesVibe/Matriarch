@@ -26,6 +26,27 @@ public class AzureRoleAssignmentServiceTests
         _resourceGraphServiceMock = new Mock<IResourceGraphService>();
     }
 
+    private static Identity CreateServicePrincipalIdentity(string objectId, string name = "Test Service Principal", string appId = "app-id")
+    {
+        return new Identity
+        {
+            ObjectId = objectId,
+            Name = name,
+            Type = IdentityType.ServicePrincipal,
+            ApplicationId = appId
+        };
+    }
+
+    private AzureRoleAssignmentService CreateService()
+    {
+        return new AzureRoleAssignmentService(
+            _loggerMock.Object,
+            _identityServiceMock.Object,
+            _groupManagementServiceMock.Object,
+            _apiPermissionsServiceMock.Object,
+            _resourceGraphServiceMock.Object);
+    }
+
     /// <summary>
     /// Test that verifies when a Service Principal ObjectId is provided and the SP is a member of group A,
     /// which is in turn a member of groups B and C, then FetchRoleAssignmentsForPrincipalsAsync is called
@@ -40,13 +61,7 @@ public class AzureRoleAssignmentServiceTests
         var groupBId = "group-b-id";
         var groupCId = "group-c-id";
 
-        var identity = new Identity
-        {
-            ObjectId = spObjectId,
-            Name = "Test Service Principal",
-            Type = IdentityType.ServicePrincipal,
-            ApplicationId = "app-id-123"
-        };
+        var identity = CreateServicePrincipalIdentity(spObjectId, "Test Service Principal", "app-id-123");
 
         // Setup: SP is a direct member of group A
         var directGroupIds = new List<string> { groupAId };
@@ -83,12 +98,7 @@ public class AzureRoleAssignmentServiceTests
             .Setup(s => s.GetApiPermissionsAsync(It.IsAny<Identity>()))
             .ReturnsAsync(new List<ApiPermission>());
 
-        var service = new AzureRoleAssignmentService(
-            _loggerMock.Object,
-            _identityServiceMock.Object,
-            _groupManagementServiceMock.Object,
-            _apiPermissionsServiceMock.Object,
-            _resourceGraphServiceMock.Object);
+        var service = CreateService();
 
         // Act
         await service.GetRoleAssignmentsAsync(identity);
@@ -120,13 +130,7 @@ public class AzureRoleAssignmentServiceTests
         // Arrange
         var spObjectId = "sp-object-id-456";
 
-        var identity = new Identity
-        {
-            ObjectId = spObjectId,
-            Name = "Isolated Service Principal",
-            Type = IdentityType.ServicePrincipal,
-            ApplicationId = "app-id-456"
-        };
+        var identity = CreateServicePrincipalIdentity(spObjectId, "Isolated Service Principal", "app-id-456");
 
         // Setup: SP has no direct group memberships
         var directGroupIds = new List<string>();
@@ -158,12 +162,7 @@ public class AzureRoleAssignmentServiceTests
             .Setup(s => s.GetApiPermissionsAsync(It.IsAny<Identity>()))
             .ReturnsAsync(new List<ApiPermission>());
 
-        var service = new AzureRoleAssignmentService(
-            _loggerMock.Object,
-            _identityServiceMock.Object,
-            _groupManagementServiceMock.Object,
-            _apiPermissionsServiceMock.Object,
-            _resourceGraphServiceMock.Object);
+        var service = CreateService();
 
         // Act
         await service.GetRoleAssignmentsAsync(identity);
@@ -187,13 +186,7 @@ public class AzureRoleAssignmentServiceTests
         var groupBId = "group-b-id";
         var sharedParentId = "shared-parent-id";
 
-        var identity = new Identity
-        {
-            ObjectId = spObjectId,
-            Name = "Test Service Principal",
-            Type = IdentityType.ServicePrincipal,
-            ApplicationId = "app-id-789"
-        };
+        var identity = CreateServicePrincipalIdentity(spObjectId, "Test Service Principal", "app-id-789");
 
         // Setup: SP is a direct member of groups A and B
         var directGroupIds = new List<string> { groupAId, groupBId };
@@ -230,12 +223,7 @@ public class AzureRoleAssignmentServiceTests
             .Setup(s => s.GetApiPermissionsAsync(It.IsAny<Identity>()))
             .ReturnsAsync(new List<ApiPermission>());
 
-        var service = new AzureRoleAssignmentService(
-            _loggerMock.Object,
-            _identityServiceMock.Object,
-            _groupManagementServiceMock.Object,
-            _apiPermissionsServiceMock.Object,
-            _resourceGraphServiceMock.Object);
+        var service = CreateService();
 
         // Act
         await service.GetRoleAssignmentsAsync(identity);
@@ -266,13 +254,7 @@ public class AzureRoleAssignmentServiceTests
         var groupLevel2Id = "group-level-2";
         var groupLevel3Id = "group-level-3";
 
-        var identity = new Identity
-        {
-            ObjectId = spObjectId,
-            Name = "Deeply Nested SP",
-            Type = IdentityType.ServicePrincipal,
-            ApplicationId = "app-id-deep"
-        };
+        var identity = CreateServicePrincipalIdentity(spObjectId, "Deeply Nested SP", "app-id-deep");
 
         // Setup: SP is a direct member of group level 1
         var directGroupIds = new List<string> { groupLevel1Id };
@@ -309,12 +291,7 @@ public class AzureRoleAssignmentServiceTests
             .Setup(s => s.GetApiPermissionsAsync(It.IsAny<Identity>()))
             .ReturnsAsync(new List<ApiPermission>());
 
-        var service = new AzureRoleAssignmentService(
-            _loggerMock.Object,
-            _identityServiceMock.Object,
-            _groupManagementServiceMock.Object,
-            _apiPermissionsServiceMock.Object,
-            _resourceGraphServiceMock.Object);
+        var service = CreateService();
 
         // Act
         await service.GetRoleAssignmentsAsync(identity);
