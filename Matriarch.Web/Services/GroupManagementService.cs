@@ -237,7 +237,8 @@ public class GroupManagementService : IGroupManagementService
                             // Add new parent groups to the queue
                             foreach (var parentGroupId in groupInfo.ParentGroupIds)
                             {
-                                if (!processedGroups.ContainsKey(parentGroupId))
+                                // Atomically check and mark as queued to avoid duplicate processing
+                                if (processedGroups.TryAdd(parentGroupId, 0))
                                 {
                                     allGroupIds.Add(parentGroupId);
                                     groupsToProcess.Enqueue(parentGroupId);
@@ -296,16 +297,33 @@ public class GroupManagementService : IGroupManagementService
                     ParentGroupIds = parentGroupIds
                 };
             }
-            catch (Exception ex)
+            catch (Azure.RequestFailedException azEx) when (azEx.Status == 429 || azEx.Status == 503)
             {
-                // Check if it's a throttling error (429) or service unavailable (503)
-                bool isThrottling = ex.Message.Contains("429") || ex.Message.Contains("503") || 
-                                  ex.Message.Contains("TooManyRequests") || ex.Message.Contains("ServiceUnavailable");
-                
-                if (isThrottling && attempt < maxRetries)
+                // Azure SDK throttling or service unavailable
+                if (attempt < maxRetries)
                 {
                     var delay = retryDelay * (int)Math.Pow(2, attempt); // Exponential backoff
-                    _logger.LogWarning("Throttling detected for {GroupId}, retrying in {Delay}ms (attempt {Attempt}/{MaxRetries})", 
+                    _logger.LogWarning("Azure throttling detected (Status: {Status}) for {GroupId}, retrying in {Delay}ms (attempt {Attempt}/{MaxRetries})", 
+                        azEx.Status, groupId, delay, attempt + 1, maxRetries);
+                    await Task.Delay(delay);
+                }
+                else
+                {
+                    _logger.LogError(azEx, "Max retries exceeded for {GroupId} due to throttling", groupId);
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                // Check for throttling in exception message as fallback
+                bool isPotentialThrottling = ex.Message.Contains("429") || ex.Message.Contains("503") || 
+                                           ex.Message.Contains("TooManyRequests", StringComparison.OrdinalIgnoreCase) || 
+                                           ex.Message.Contains("ServiceUnavailable", StringComparison.OrdinalIgnoreCase);
+                
+                if (isPotentialThrottling && attempt < maxRetries)
+                {
+                    var delay = retryDelay * (int)Math.Pow(2, attempt); // Exponential backoff
+                    _logger.LogWarning("Potential throttling detected for {GroupId}, retrying in {Delay}ms (attempt {Attempt}/{MaxRetries})", 
                         groupId, delay, attempt + 1, maxRetries);
                     await Task.Delay(delay);
                 }
