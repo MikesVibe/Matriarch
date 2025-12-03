@@ -35,15 +35,17 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
     {
         _logger.LogInformation("Fetching role assignments from Azure for identity: {Name} ({ObjectId})", identity.Name, identity.ObjectId);
 
+        var totalStopwatch = System.Diagnostics.Stopwatch.StartNew();
+        
         try
         {
             // Step 1: Get direct group memberships
             var directGroupIds = await _groupManagementService.GetGroupMembershipsAsync(identity);
             
-            var (parentGroupIds, groupInfoMap, elapsedTime) = await _groupManagementService.GetParentGroupsAsync(directGroupIds, useParallelProcessing);
+            var (parentGroupIds, groupInfoMap, groupHierarchyTime) = await _groupManagementService.GetParentGroupsAsync(directGroupIds, useParallelProcessing);
 
-            _logger.LogInformation("Found {DirectCount} direct groups and {TotalCount} total groups (including indirect)", 
-                directGroupIds.Count, parentGroupIds.Count);
+            _logger.LogInformation("Found {DirectCount} direct groups and {TotalCount} total groups (including indirect) in {ElapsedMs}ms", 
+                directGroupIds.Count, parentGroupIds.Count, groupHierarchyTime.TotalMilliseconds);
 
             // Step 2: Fetch role assignments for principal and ALL groups (direct and indirect)
             var principalIds = new List<string> { identity.ObjectId };
@@ -71,6 +73,8 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             // Step 4: Fetch API permissions (only for service principals and managed identities)
             var apiPermissions = await _apiPermissionsService.GetApiPermissionsAsync(identity);
 
+            totalStopwatch.Stop();
+
             var result = new IdentityRoleAssignmentResult
             {
                 Identity = identity,
@@ -80,7 +84,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                 ApiPermissions = apiPermissions
             };
 
-            return (result, elapsedTime);
+            return (result, totalStopwatch.Elapsed);
         }
         catch (Exception ex)
         {

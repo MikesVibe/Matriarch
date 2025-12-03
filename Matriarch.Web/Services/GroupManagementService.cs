@@ -237,8 +237,8 @@ public class GroupManagementService : IGroupManagementService
                             // Add new parent groups to the queue
                             foreach (var parentGroupId in groupInfo.ParentGroupIds)
                             {
-                                // Atomically check and mark as queued to avoid duplicate processing
-                                if (processedGroups.TryAdd(parentGroupId, 0))
+                                // Check if not already processed or in queue
+                                if (!processedGroups.ContainsKey(parentGroupId))
                                 {
                                     allGroupIds.Add(parentGroupId);
                                     groupsToProcess.Enqueue(parentGroupId);
