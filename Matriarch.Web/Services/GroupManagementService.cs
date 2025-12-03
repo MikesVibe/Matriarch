@@ -143,64 +143,112 @@ public class GroupManagementService : IGroupManagementService
     private async Task<(List<string> parentGroupIds, Dictionary<string, GroupInfo> groupInfoMap)> GetParentGroupsSequentialAsync(List<string> directGroupIds)
     {
         var allGroupIds = new HashSet<string>(directGroupIds);
-        var groupsToProcess = new Queue<string>(directGroupIds);
-        var processedGroups = new HashSet<string>();
         var groupInfoMap = new Dictionary<string, GroupInfo>();
 
-        while (groupsToProcess.Count > 0)
+        // Process each direct group to get all transitive parent groups
+        foreach (var groupId in directGroupIds)
         {
-            var currentGroupId = groupsToProcess.Dequeue();
-            
-            // Skip if already processed (circular reference protection)
-            if (processedGroups.Contains(currentGroupId))
-            {
-                continue;
-            }
-            
-            processedGroups.Add(currentGroupId);
-
             try
             {
-                // Get group details and parent groups in a single operation
-                var group = await _graphClient.Groups[currentGroupId].GetAsync();
-                var memberOfPage = await _graphClient.Groups[currentGroupId].MemberOf.GetAsync(config =>
+                // Get group details
+                var group = await _graphClient.Groups[groupId].GetAsync();
+                
+                // Use TransitiveMemberOf to get all parent groups (direct and indirect) in one call
+                var transitiveMemberOfPage = await _graphClient.Groups[groupId].TransitiveMemberOf.GetAsync(config =>
                 {
                     config.QueryParameters.Top = MaxGraphPageSize;
                 });
 
-                var parentGroupIds = new List<string>();
+                var directParentGroupIds = new List<string>();
+                
+                // First, get direct parent groups using MemberOf
+                var memberOfPage = await _graphClient.Groups[groupId].MemberOf.GetAsync(config =>
+                {
+                    config.QueryParameters.Top = MaxGraphPageSize;
+                });
+                
                 if (memberOfPage?.Value != null)
                 {
                     foreach (var directoryObject in memberOfPage.Value)
                     {
                         if (directoryObject is Group parentGroup && parentGroup.SecurityEnabled == true && !string.IsNullOrEmpty(parentGroup.Id))
                         {
-                            parentGroupIds.Add(parentGroup.Id);
-                            if (allGroupIds.Add(parentGroup.Id))
-                            {
-                                // New group found, add to queue for processing
-                                groupsToProcess.Enqueue(parentGroup.Id);
-                            }
+                            directParentGroupIds.Add(parentGroup.Id);
                         }
                     }
                 }
 
-                // Store group information
-                groupInfoMap[currentGroupId] = new GroupInfo
+                // Store group information with direct parents
+                groupInfoMap[groupId] = new GroupInfo
                 {
-                    Id = group?.Id ?? currentGroupId,
+                    Id = group?.Id ?? groupId,
                     DisplayName = group?.DisplayName ?? string.Empty,
                     Description = group?.Description ?? string.Empty,
-                    ParentGroupIds = parentGroupIds
+                    ParentGroupIds = directParentGroupIds
+                };
+
+                // Add all transitive parent groups to the set
+                if (transitiveMemberOfPage?.Value != null)
+                {
+                    foreach (var directoryObject in transitiveMemberOfPage.Value)
+                    {
+                        if (directoryObject is Group parentGroup && parentGroup.SecurityEnabled == true && !string.IsNullOrEmpty(parentGroup.Id))
+                        {
+                            allGroupIds.Add(parentGroup.Id);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error fetching parent groups for {GroupId}", groupId);
+            }
+        }
+
+        // Now fetch details for all discovered parent groups
+        var parentGroupIds = allGroupIds.Except(directGroupIds).ToList();
+        foreach (var parentGroupId in parentGroupIds)
+        {
+            if (groupInfoMap.ContainsKey(parentGroupId))
+            {
+                continue; // Already have info for this group
+            }
+
+            try
+            {
+                var group = await _graphClient.Groups[parentGroupId].GetAsync();
+                var memberOfPage = await _graphClient.Groups[parentGroupId].MemberOf.GetAsync(config =>
+                {
+                    config.QueryParameters.Top = MaxGraphPageSize;
+                });
+
+                var directParentGroupIds = new List<string>();
+                if (memberOfPage?.Value != null)
+                {
+                    foreach (var directoryObject in memberOfPage.Value)
+                    {
+                        if (directoryObject is Group parentGroup && parentGroup.SecurityEnabled == true && !string.IsNullOrEmpty(parentGroup.Id))
+                        {
+                            directParentGroupIds.Add(parentGroup.Id);
+                        }
+                    }
+                }
+
+                groupInfoMap[parentGroupId] = new GroupInfo
+                {
+                    Id = group?.Id ?? parentGroupId,
+                    DisplayName = group?.DisplayName ?? string.Empty,
+                    Description = group?.Description ?? string.Empty,
+                    ParentGroupIds = directParentGroupIds
                 };
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Error fetching parent groups for {GroupId}", currentGroupId);
+                _logger.LogWarning(ex, "Error fetching parent group details for {GroupId}", parentGroupId);
             }
         }
 
-        return (allGroupIds.Except(directGroupIds).ToList(), groupInfoMap);
+        return (parentGroupIds, groupInfoMap);
     }
 
     private async Task<(List<string> parentGroupIds, Dictionary<string, GroupInfo> groupInfoMap)> GetParentGroupsParallelAsync(List<string> directGroupIds)
