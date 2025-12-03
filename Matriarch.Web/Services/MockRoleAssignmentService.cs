@@ -5,6 +5,7 @@ namespace Matriarch.Web.Services;
 public interface IRoleAssignmentService
 {
     Task<IdentityRoleAssignmentResult> GetRoleAssignmentsAsync(Identity identity);
+    Task<(IdentityRoleAssignmentResult result, TimeSpan elapsedTime)> GetRoleAssignmentsAsync(Identity identity, bool useParallelProcessing);
     Task<IdentitySearchResult> SearchIdentitiesAsync(string searchInput);
 }
 
@@ -94,6 +95,12 @@ public class MockRoleAssignmentService : IRoleAssignmentService
 
     public async Task<IdentityRoleAssignmentResult> GetRoleAssignmentsAsync(Identity identity)
     {
+        var (result, _) = await GetRoleAssignmentsAsync(identity, false);
+        return result;
+    }
+
+    public async Task<(IdentityRoleAssignmentResult result, TimeSpan elapsedTime)> GetRoleAssignmentsAsync(Identity identity, bool useParallelProcessing)
+    {
         // For demo purposes, return mock data for the provided identity
         // In a real implementation, this would query Azure or Neo4j
         
@@ -111,7 +118,7 @@ public class MockRoleAssignmentService : IRoleAssignmentService
             ApiPermissions = apiPermissions
         };
 
-        return result;
+        return (result, TimeSpan.Zero);
     }
 
     public Task<IdentitySearchResult> SearchIdentitiesAsync(string searchInput)

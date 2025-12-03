@@ -4,6 +4,8 @@ using Microsoft.Graph.Beta;
 using Microsoft.Graph.Beta.Models;
 using Matriarch.Web.Models;
 using Matriarch.Web.Configuration;
+using System.Collections.Concurrent;
+using System.Diagnostics;
 
 namespace Matriarch.Web.Services;
 
@@ -11,6 +13,7 @@ public interface IGroupManagementService
 {
     Task<List<string>> GetGroupMembershipsAsync(Models.Identity identity);
     Task<(List<string> parentGroupIds, Dictionary<string, GroupInfo> groupInfoMap)> GetParentGroupsAsync(List<string> directGroupIds);
+    Task<(List<string> parentGroupIds, Dictionary<string, GroupInfo> groupInfoMap, TimeSpan elapsedTime)> GetParentGroupsAsync(List<string> directGroupIds, bool useParallelProcessing);
     List<SecurityGroup> BuildSecurityGroupsWithPreFetchedData(List<string> directGroupIds, Dictionary<string, GroupInfo> groupInfoMap, List<AzureRoleAssignmentDto> roleAssignments);
 }
 
@@ -36,11 +39,13 @@ public class GroupManagementService : IGroupManagementService
 {
     private readonly ILogger<GroupManagementService> _logger;
     private readonly GraphServiceClient _graphClient;
+    private readonly AppSettings _settings;
     private const int MaxGraphPageSize = 999;
 
     public GroupManagementService(AppSettings settings, ILogger<GroupManagementService> logger)
     {
         _logger = logger;
+        _settings = settings;
 
         // Use ClientSecretCredential for authentication
         var credential = new ClientSecretCredential(
@@ -111,6 +116,32 @@ public class GroupManagementService : IGroupManagementService
 
     public async Task<(List<string> parentGroupIds, Dictionary<string, GroupInfo> groupInfoMap)> GetParentGroupsAsync(List<string> directGroupIds)
     {
+        var result = await GetParentGroupsAsync(directGroupIds, _settings.Parallelization.EnableParallelProcessing);
+        return (result.parentGroupIds, result.groupInfoMap);
+    }
+
+    public async Task<(List<string> parentGroupIds, Dictionary<string, GroupInfo> groupInfoMap, TimeSpan elapsedTime)> GetParentGroupsAsync(List<string> directGroupIds, bool useParallelProcessing)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        
+        if (useParallelProcessing)
+        {
+            var (parentGroupIds, groupInfoMap) = await GetParentGroupsParallelAsync(directGroupIds);
+            stopwatch.Stop();
+            _logger.LogInformation("GetParentGroupsAsync (Parallel) completed in {ElapsedMs}ms", stopwatch.ElapsedMilliseconds);
+            return (parentGroupIds, groupInfoMap, stopwatch.Elapsed);
+        }
+        else
+        {
+            var (parentGroupIds, groupInfoMap) = await GetParentGroupsSequentialAsync(directGroupIds);
+            stopwatch.Stop();
+            _logger.LogInformation("GetParentGroupsAsync (Sequential) completed in {ElapsedMs}ms", stopwatch.ElapsedMilliseconds);
+            return (parentGroupIds, groupInfoMap, stopwatch.Elapsed);
+        }
+    }
+
+    private async Task<(List<string> parentGroupIds, Dictionary<string, GroupInfo> groupInfoMap)> GetParentGroupsSequentialAsync(List<string> directGroupIds)
+    {
         var allGroupIds = new HashSet<string>(directGroupIds);
         var groupsToProcess = new Queue<string>(directGroupIds);
         var processedGroups = new HashSet<string>();
@@ -170,6 +201,129 @@ public class GroupManagementService : IGroupManagementService
         }
 
         return (allGroupIds.Except(directGroupIds).ToList(), groupInfoMap);
+    }
+
+    private async Task<(List<string> parentGroupIds, Dictionary<string, GroupInfo> groupInfoMap)> GetParentGroupsParallelAsync(List<string> directGroupIds)
+    {
+        var allGroupIds = new ConcurrentBag<string>(directGroupIds);
+        var groupsToProcess = new ConcurrentQueue<string>(directGroupIds);
+        var processedGroups = new ConcurrentDictionary<string, byte>();
+        var groupInfoMap = new ConcurrentDictionary<string, GroupInfo>();
+        
+        var maxDegreeOfParallelism = _settings.Parallelization.MaxDegreeOfParallelism;
+        var processingTasks = new List<Task>();
+
+        // Create parallel workers
+        for (int i = 0; i < maxDegreeOfParallelism; i++)
+        {
+            processingTasks.Add(Task.Run(async () =>
+            {
+                while (groupsToProcess.TryDequeue(out var currentGroupId))
+                {
+                    // Skip if already processed (circular reference protection)
+                    if (!processedGroups.TryAdd(currentGroupId, 0))
+                    {
+                        continue;
+                    }
+
+                    try
+                    {
+                        var groupInfo = await FetchGroupInfoWithRetryAsync(currentGroupId);
+                        
+                        if (groupInfo != null)
+                        {
+                            groupInfoMap[currentGroupId] = groupInfo;
+                            
+                            // Add new parent groups to the queue
+                            foreach (var parentGroupId in groupInfo.ParentGroupIds)
+                            {
+                                if (!processedGroups.ContainsKey(parentGroupId))
+                                {
+                                    allGroupIds.Add(parentGroupId);
+                                    groupsToProcess.Enqueue(parentGroupId);
+                                }
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Error fetching parent groups for {GroupId}", currentGroupId);
+                    }
+                }
+            }));
+        }
+
+        // Wait for all workers to complete
+        await Task.WhenAll(processingTasks);
+
+        var allGroupIdsList = allGroupIds.Distinct().ToList();
+        return (allGroupIdsList.Except(directGroupIds).ToList(), groupInfoMap.ToDictionary(kvp => kvp.Key, kvp => kvp.Value));
+    }
+
+    private async Task<GroupInfo?> FetchGroupInfoWithRetryAsync(string groupId)
+    {
+        var maxRetries = _settings.Parallelization.MaxRetryAttempts;
+        var retryDelay = _settings.Parallelization.RetryDelayMilliseconds;
+
+        for (int attempt = 0; attempt <= maxRetries; attempt++)
+        {
+            try
+            {
+                // Get group details and parent groups in a single operation
+                var group = await _graphClient.Groups[groupId].GetAsync();
+                var memberOfPage = await _graphClient.Groups[groupId].MemberOf.GetAsync(config =>
+                {
+                    config.QueryParameters.Top = MaxGraphPageSize;
+                });
+
+                var parentGroupIds = new List<string>();
+                if (memberOfPage?.Value != null)
+                {
+                    foreach (var directoryObject in memberOfPage.Value)
+                    {
+                        if (directoryObject is Group parentGroup && parentGroup.SecurityEnabled == true && !string.IsNullOrEmpty(parentGroup.Id))
+                        {
+                            parentGroupIds.Add(parentGroup.Id);
+                        }
+                    }
+                }
+
+                return new GroupInfo
+                {
+                    Id = group?.Id ?? groupId,
+                    DisplayName = group?.DisplayName ?? string.Empty,
+                    Description = group?.Description ?? string.Empty,
+                    ParentGroupIds = parentGroupIds
+                };
+            }
+            catch (Exception ex)
+            {
+                // Check if it's a throttling error (429) or service unavailable (503)
+                bool isThrottling = ex.Message.Contains("429") || ex.Message.Contains("503") || 
+                                  ex.Message.Contains("TooManyRequests") || ex.Message.Contains("ServiceUnavailable");
+                
+                if (isThrottling && attempt < maxRetries)
+                {
+                    var delay = retryDelay * (int)Math.Pow(2, attempt); // Exponential backoff
+                    _logger.LogWarning("Throttling detected for {GroupId}, retrying in {Delay}ms (attempt {Attempt}/{MaxRetries})", 
+                        groupId, delay, attempt + 1, maxRetries);
+                    await Task.Delay(delay);
+                }
+                else if (attempt < maxRetries)
+                {
+                    _logger.LogWarning(ex, "Error fetching group info for {GroupId} on attempt {Attempt}, retrying...", 
+                        groupId, attempt + 1);
+                    await Task.Delay(retryDelay);
+                }
+                else
+                {
+                    _logger.LogError(ex, "Max retries exceeded for {GroupId}", groupId);
+                    throw;
+                }
+            }
+        }
+
+        return null;
     }
 
     public List<SecurityGroup> BuildSecurityGroupsWithPreFetchedData(

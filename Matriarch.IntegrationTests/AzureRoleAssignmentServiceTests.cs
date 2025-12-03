@@ -80,6 +80,9 @@ public class AzureRoleAssignmentServiceTests
         _groupManagementServiceMock
             .Setup(s => s.GetParentGroupsAsync(directGroupIds))
             .ReturnsAsync((parentGroupIds, groupInfoMap));
+        _groupManagementServiceMock
+            .Setup(s => s.GetParentGroupsAsync(directGroupIds, It.IsAny<bool>()))
+            .ReturnsAsync((parentGroupIds, groupInfoMap, TimeSpan.Zero));
 
         // Setup: Build security groups with pre-fetched data - return empty list as we're only testing FetchRoleAssignmentsForPrincipalsAsync
         _groupManagementServiceMock
@@ -144,6 +147,9 @@ public class AzureRoleAssignmentServiceTests
         _groupManagementServiceMock
             .Setup(s => s.GetParentGroupsAsync(directGroupIds))
             .ReturnsAsync((parentGroupIds, groupInfoMap));
+        _groupManagementServiceMock
+            .Setup(s => s.GetParentGroupsAsync(directGroupIds, It.IsAny<bool>()))
+            .ReturnsAsync((parentGroupIds, groupInfoMap, TimeSpan.Zero));
 
         // Setup: Build security groups
         _groupManagementServiceMock
@@ -205,6 +211,9 @@ public class AzureRoleAssignmentServiceTests
         _groupManagementServiceMock
             .Setup(s => s.GetParentGroupsAsync(directGroupIds))
             .ReturnsAsync((parentGroupIds, groupInfoMap));
+        _groupManagementServiceMock
+            .Setup(s => s.GetParentGroupsAsync(directGroupIds, It.IsAny<bool>()))
+            .ReturnsAsync((parentGroupIds, groupInfoMap, TimeSpan.Zero));
 
         // Setup: Build security groups
         _groupManagementServiceMock
@@ -273,6 +282,9 @@ public class AzureRoleAssignmentServiceTests
         _groupManagementServiceMock
             .Setup(s => s.GetParentGroupsAsync(directGroupIds))
             .ReturnsAsync((parentGroupIds, groupInfoMap));
+        _groupManagementServiceMock
+            .Setup(s => s.GetParentGroupsAsync(directGroupIds, It.IsAny<bool>()))
+            .ReturnsAsync((parentGroupIds, groupInfoMap, TimeSpan.Zero));
 
         // Setup: Build security groups
         _groupManagementServiceMock

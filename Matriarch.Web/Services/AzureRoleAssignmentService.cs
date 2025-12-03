@@ -27,6 +27,12 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
 
     public async Task<IdentityRoleAssignmentResult> GetRoleAssignmentsAsync(Identity identity)
     {
+        var (result, _) = await GetRoleAssignmentsAsync(identity, false);
+        return result;
+    }
+
+    public async Task<(IdentityRoleAssignmentResult result, TimeSpan elapsedTime)> GetRoleAssignmentsAsync(Identity identity, bool useParallelProcessing)
+    {
         _logger.LogInformation("Fetching role assignments from Azure for identity: {Name} ({ObjectId})", identity.Name, identity.ObjectId);
 
         try
@@ -34,7 +40,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             // Step 1: Get direct group memberships
             var directGroupIds = await _groupManagementService.GetGroupMembershipsAsync(identity);
             
-            var (parentGroupIds, groupInfoMap) = await _groupManagementService.GetParentGroupsAsync(directGroupIds);
+            var (parentGroupIds, groupInfoMap, elapsedTime) = await _groupManagementService.GetParentGroupsAsync(directGroupIds, useParallelProcessing);
 
             _logger.LogInformation("Found {DirectCount} direct groups and {TotalCount} total groups (including indirect)", 
                 directGroupIds.Count, parentGroupIds.Count);
@@ -65,7 +71,7 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             // Step 4: Fetch API permissions (only for service principals and managed identities)
             var apiPermissions = await _apiPermissionsService.GetApiPermissionsAsync(identity);
 
-            return new IdentityRoleAssignmentResult
+            var result = new IdentityRoleAssignmentResult
             {
                 Identity = identity,
                 DirectRoleAssignments = directRoleAssignments,
@@ -73,6 +79,8 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                 SecurityIndirectGroups = securityIndirectGroups,
                 ApiPermissions = apiPermissions
             };
+
+            return (result, elapsedTime);
         }
         catch (Exception ex)
         {
