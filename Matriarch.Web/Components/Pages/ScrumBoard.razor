@@ -1,0 +1,287 @@
+@page "/scrumboard"
+@using Matriarch.Web.Models
+@using Matriarch.Web.Services
+@using Microsoft.AspNetCore.SignalR.Client
+@inject IScrumBoardService ScrumBoardService
+@inject NavigationManager NavigationManager
+@implements IAsyncDisposable
+@rendermode InteractiveServer
+
+<PageTitle>Scrum Board</PageTitle>
+
+<h1>Scrum Board</h1>
+
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header">
+                <h5>Add New Task</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label for="taskTitle" class="form-label">Title</label>
+                    <input type="text" class="form-control" id="taskTitle" @bind="newTaskTitle" placeholder="Enter task title" />
+                </div>
+                <div class="mb-3">
+                    <label for="taskDescription" class="form-label">Description</label>
+                    <textarea class="form-control" id="taskDescription" @bind="newTaskDescription" rows="3" placeholder="Enter task description"></textarea>
+                </div>
+                <button class="btn btn-primary" @onclick="AddTask">
+                    <i class="bi bi-plus-circle"></i> Add Task
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-header bg-secondary text-white">
+                <h5>New</h5>
+            </div>
+            <div class="card-body scrum-column" 
+                 ondragover="event.preventDefault();"
+                 @ondrop="@(() => HandleDrop(ScrumTaskStatus.New))"
+                 @ondragover:preventDefault="true">
+                @foreach (var task in GetTasksByStatus(ScrumTaskStatus.New))
+                {
+                    <div class="card mb-2 scrum-task" 
+                         draggable="true"
+                         @ondragstart="@(() => HandleDragStart(task.Id))"
+                         style="cursor: move;">
+                        <div class="card-body">
+                            <h6 class="card-title">@task.Title</h6>
+                            <p class="card-text small">@task.Description</p>
+                            <small class="text-muted">@task.CreatedAt.ToString("g")</small>
+                            <button class="btn btn-sm btn-danger float-end" @onclick="@(() => DeleteTask(task.Id))">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-header bg-info text-white">
+                <h5>ToDo</h5>
+            </div>
+            <div class="card-body scrum-column"
+                 ondragover="event.preventDefault();"
+                 @ondrop="@(() => HandleDrop(ScrumTaskStatus.ToDo))"
+                 @ondragover:preventDefault="true">
+                @foreach (var task in GetTasksByStatus(ScrumTaskStatus.ToDo))
+                {
+                    <div class="card mb-2 scrum-task" 
+                         draggable="true"
+                         @ondragstart="@(() => HandleDragStart(task.Id))"
+                         style="cursor: move;">
+                        <div class="card-body">
+                            <h6 class="card-title">@task.Title</h6>
+                            <p class="card-text small">@task.Description</p>
+                            <small class="text-muted">@task.CreatedAt.ToString("g")</small>
+                            <button class="btn btn-sm btn-danger float-end" @onclick="@(() => DeleteTask(task.Id))">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-header bg-warning text-dark">
+                <h5>InProgress</h5>
+            </div>
+            <div class="card-body scrum-column"
+                 ondragover="event.preventDefault();"
+                 @ondrop="@(() => HandleDrop(ScrumTaskStatus.InProgress))"
+                 @ondragover:preventDefault="true">
+                @foreach (var task in GetTasksByStatus(ScrumTaskStatus.InProgress))
+                {
+                    <div class="card mb-2 scrum-task" 
+                         draggable="true"
+                         @ondragstart="@(() => HandleDragStart(task.Id))"
+                         style="cursor: move;">
+                        <div class="card-body">
+                            <h6 class="card-title">@task.Title</h6>
+                            <p class="card-text small">@task.Description</p>
+                            <small class="text-muted">@task.CreatedAt.ToString("g")</small>
+                            <button class="btn btn-sm btn-danger float-end" @onclick="@(() => DeleteTask(task.Id))">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="card">
+            <div class="card-header bg-success text-white">
+                <h5>Completed</h5>
+            </div>
+            <div class="card-body scrum-column"
+                 ondragover="event.preventDefault();"
+                 @ondrop="@(() => HandleDrop(ScrumTaskStatus.Completed))"
+                 @ondragover:preventDefault="true">
+                @foreach (var task in GetTasksByStatus(ScrumTaskStatus.Completed))
+                {
+                    <div class="card mb-2 scrum-task" 
+                         draggable="true"
+                         @ondragstart="@(() => HandleDragStart(task.Id))"
+                         style="cursor: move;">
+                        <div class="card-body">
+                            <h6 class="card-title">@task.Title</h6>
+                            <p class="card-text small">@task.Description</p>
+                            <small class="text-muted">@task.CreatedAt.ToString("g")</small>
+                            <button class="btn btn-sm btn-danger float-end" @onclick="@(() => DeleteTask(task.Id))">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private HubConnection? hubConnection;
+    private string newTaskTitle = string.Empty;
+    private string newTaskDescription = string.Empty;
+    private string? draggedTaskId;
+    private List<ScrumTask> tasks = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Load existing tasks
+        tasks = ScrumBoardService.GetAllTasks().ToList();
+
+        // Initialize SignalR connection
+        hubConnection = new HubConnectionBuilder()
+            .WithUrl(NavigationManager.ToAbsoluteUri("/scrumboardhub"))
+            .Build();
+
+        hubConnection.On<string>("TaskAdded", async (taskJson) =>
+        {
+            var task = System.Text.Json.JsonSerializer.Deserialize<ScrumTask>(taskJson);
+            if (task != null && !tasks.Any(t => t.Id == task.Id))
+            {
+                tasks.Add(task);
+                await InvokeAsync(StateHasChanged);
+            }
+        });
+
+        hubConnection.On<string, string>("TaskMoved", async (taskId, newStatus) =>
+        {
+            var task = tasks.FirstOrDefault(t => t.Id == taskId);
+            if (task != null && Enum.TryParse<ScrumTaskStatus>(newStatus, out var status))
+            {
+                task.Status = status;
+                task.UpdatedAt = DateTime.UtcNow;
+                await InvokeAsync(StateHasChanged);
+            }
+        });
+
+        hubConnection.On<string>("TaskDeleted", async (taskId) =>
+        {
+            var task = tasks.FirstOrDefault(t => t.Id == taskId);
+            if (task != null)
+            {
+                tasks.Remove(task);
+                await InvokeAsync(StateHasChanged);
+            }
+        });
+
+        await hubConnection.StartAsync();
+    }
+
+    private async Task AddTask()
+    {
+        if (string.IsNullOrWhiteSpace(newTaskTitle))
+            return;
+
+        var task = new ScrumTask
+        {
+            Title = newTaskTitle,
+            Description = newTaskDescription,
+            Status = ScrumTaskStatus.New
+        };
+
+        ScrumBoardService.AddTask(task);
+        tasks.Add(task);
+
+        // Broadcast to other clients
+        if (hubConnection is not null)
+        {
+            var taskJson = System.Text.Json.JsonSerializer.Serialize(task);
+            await hubConnection.SendAsync("TaskAdded", taskJson);
+        }
+
+        newTaskTitle = string.Empty;
+        newTaskDescription = string.Empty;
+    }
+
+    private void HandleDragStart(string taskId)
+    {
+        draggedTaskId = taskId;
+    }
+
+    private async Task HandleDrop(ScrumTaskStatus newStatus)
+    {
+        if (string.IsNullOrEmpty(draggedTaskId))
+            return;
+
+        var task = tasks.FirstOrDefault(t => t.Id == draggedTaskId);
+        if (task != null && task.Status != newStatus)
+        {
+            task.Status = newStatus;
+            task.UpdatedAt = DateTime.UtcNow;
+            ScrumBoardService.MoveTask(draggedTaskId, newStatus);
+
+            // Broadcast to other clients
+            if (hubConnection is not null)
+            {
+                await hubConnection.SendAsync("TaskMoved", draggedTaskId, newStatus.ToString());
+            }
+        }
+
+        draggedTaskId = null;
+    }
+
+    private async Task DeleteTask(string taskId)
+    {
+        var task = tasks.FirstOrDefault(t => t.Id == taskId);
+        if (task != null)
+        {
+            tasks.Remove(task);
+            ScrumBoardService.DeleteTask(taskId);
+
+            // Broadcast to other clients
+            if (hubConnection is not null)
+            {
+                await hubConnection.SendAsync("TaskDeleted", taskId);
+            }
+        }
+    }
+
+    private IEnumerable<ScrumTask> GetTasksByStatus(ScrumTaskStatus status)
+    {
+        return tasks.Where(t => t.Status == status).OrderBy(t => t.CreatedAt);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (hubConnection is not null)
+        {
+            await hubConnection.DisposeAsync();
+        }
+    }
+}

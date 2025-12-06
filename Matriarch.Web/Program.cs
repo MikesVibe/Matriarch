@@ -23,6 +23,10 @@ builder.Services.AddScoped<IApiPermissionsService, AzureApiPermissionsService>()
 builder.Services.AddScoped<IResourceGraphService, AzureResourceGraphService>();
 builder.Services.AddScoped<IRoleAssignmentService, AzureRoleAssignmentService>();
 
+// Register Scrum Board services
+builder.Services.AddSingleton<IScrumBoardService, ScrumBoardService>();
+builder.Services.AddSignalR();
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -40,5 +44,7 @@ app.UseAntiforgery();
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
+
+app.MapHub<ScrumBoardHub>("/scrumboardhub");
 
 app.Run();

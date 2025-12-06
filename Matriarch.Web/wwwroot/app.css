@@ -58,3 +58,35 @@ h1:focus {
 .form-floating > .form-control-plaintext:focus::placeholder, .form-floating > .form-control:focus::placeholder {
     text-align: start;
 }
+
+/* Scrum Board Styles */
+.scrum-column {
+    min-height: 400px;
+    background-color: #f8f9fa;
+    border-radius: 0.25rem;
+    padding: 0.5rem;
+}
+
+.scrum-task {
+    transition: transform 0.2s;
+    border: 1px solid #dee2e6;
+}
+
+.scrum-task:hover {
+    transform: scale(1.02);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.scrum-task .card-body {
+    padding: 0.75rem;
+}
+
+.scrum-task .card-title {
+    margin-bottom: 0.5rem;
+    font-size: 0.95rem;
+}
+
+.scrum-task .card-text {
+    margin-bottom: 0.5rem;
+    color: #6c757d;
+}
