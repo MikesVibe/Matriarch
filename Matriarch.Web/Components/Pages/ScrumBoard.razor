@@ -2,6 +2,7 @@
 @using Matriarch.Web.Models
 @using Matriarch.Web.Services
 @using Microsoft.AspNetCore.SignalR.Client
+@using System.Text.Json
 @inject IScrumBoardService ScrumBoardService
 @inject NavigationManager NavigationManager
 @implements IAsyncDisposable
@@ -153,6 +154,7 @@
 </div>
 
 @code {
+    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
     private HubConnection? hubConnection;
     private string newTaskTitle = string.Empty;
     private string newTaskDescription = string.Empty;
@@ -171,7 +173,7 @@
 
         hubConnection.On<string>("TaskAdded", async (taskJson) =>
         {
-            var task = System.Text.Json.JsonSerializer.Deserialize<ScrumTask>(taskJson);
+            var task = JsonSerializer.Deserialize<ScrumTask>(taskJson, JsonOptions);
             if (task != null && !tasks.Any(t => t.Id == task.Id))
             {
                 tasks.Add(task);
@@ -221,7 +223,7 @@
         // Broadcast to other clients
         if (hubConnection is not null)
         {
-            var taskJson = System.Text.Json.JsonSerializer.Serialize(task);
+            var taskJson = JsonSerializer.Serialize(task, JsonOptions);
             await hubConnection.SendAsync("TaskAdded", taskJson);
         }
 
