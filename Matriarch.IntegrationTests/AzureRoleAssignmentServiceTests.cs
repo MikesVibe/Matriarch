@@ -82,10 +82,16 @@ public class AzureRoleAssignmentServiceTests
 
 
         // Setup: Resource graph service to capture the principal IDs
-        List<string>? capturedPrincipalIds = null;
+        List<string>? capturedIdentityIds = null;
+        List<string>? capturedGroupIds = null;
         _resourceGraphServiceMock
-            .Setup(s => s.FetchRoleAssignmentsForPrincipalsAsync(It.IsAny<List<string>>()))
-            .Callback<List<string>>(ids => capturedPrincipalIds = ids)
+            .Setup(s => s.FetchRoleAssignmentsForPrincipalsAsync(It.Is<List<string>>(ids => ids.Contains(spObjectId) && ids.Count == 1)))
+            .Callback<List<string>>(ids => capturedIdentityIds = ids)
+            .ReturnsAsync(new List<AzureRoleAssignmentDto>());
+        
+        _resourceGraphServiceMock
+            .Setup(s => s.FetchRoleAssignmentsForPrincipalsAsync(It.Is<List<string>>(ids => !ids.Contains(spObjectId))))
+            .Callback<List<string>>(ids => capturedGroupIds = ids)
             .ReturnsAsync(new List<AzureRoleAssignmentDto>());
 
         // Setup: API permissions service returns empty list
@@ -99,21 +105,23 @@ public class AzureRoleAssignmentServiceTests
         await service.GetRoleAssignmentsAsync(identity);
 
         // Assert
-        Assert.NotNull(capturedPrincipalIds);
+        Assert.NotNull(capturedIdentityIds);
+        Assert.NotNull(capturedGroupIds);
 
-        // Verify that FetchRoleAssignmentsForPrincipalsAsync was called exactly once
+        // Verify that FetchRoleAssignmentsForPrincipalsAsync was called twice (once for identity, once for groups)
         _resourceGraphServiceMock.Verify(
             s => s.FetchRoleAssignmentsForPrincipalsAsync(It.IsAny<List<string>>()),
-            Times.Once);
+            Times.Exactly(2));
 
-        // Verify all expected identities are included
-        Assert.Contains(spObjectId, capturedPrincipalIds); // SP ObjectId
-        Assert.Contains(groupAId, capturedPrincipalIds);   // Direct group
-        Assert.Contains(groupBId, capturedPrincipalIds);   // Parent group B
-        Assert.Contains(groupCId, capturedPrincipalIds);   // Parent group C
+        // Verify identity call
+        Assert.Single(capturedIdentityIds);
+        Assert.Equal(spObjectId, capturedIdentityIds[0]);
 
-        // Verify total count is correct (SP + group A + group B + group C = 4)
-        Assert.Equal(4, capturedPrincipalIds.Count);
+        // Verify group call includes all groups
+        Assert.Contains(groupAId, capturedGroupIds);   // Direct group
+        Assert.Contains(groupBId, capturedGroupIds);   // Parent group B
+        Assert.Contains(groupCId, capturedGroupIds);   // Parent group C
+        Assert.Equal(3, capturedGroupIds.Count);
     }
 
     /// <summary>
@@ -142,10 +150,10 @@ public class AzureRoleAssignmentServiceTests
 
 
         // Setup: Resource graph service to capture the principal IDs
-        List<string>? capturedPrincipalIds = null;
+        List<string>? capturedIdentityIds = null;
         _resourceGraphServiceMock
-            .Setup(s => s.FetchRoleAssignmentsForPrincipalsAsync(It.IsAny<List<string>>()))
-            .Callback<List<string>>(ids => capturedPrincipalIds = ids)
+            .Setup(s => s.FetchRoleAssignmentsForPrincipalsAsync(It.Is<List<string>>(ids => ids.Contains(spObjectId))))
+            .Callback<List<string>>(ids => capturedIdentityIds = ids)
             .ReturnsAsync(new List<AzureRoleAssignmentDto>());
 
         // Setup: API permissions service returns empty list
@@ -158,10 +166,15 @@ public class AzureRoleAssignmentServiceTests
         // Act
         await service.GetRoleAssignmentsAsync(identity);
 
-        // Assert
-        Assert.NotNull(capturedPrincipalIds);
-        Assert.Single(capturedPrincipalIds);
-        Assert.Equal(spObjectId, capturedPrincipalIds[0]);
+        // Assert - Since there are no groups, only the identity call should happen
+        Assert.NotNull(capturedIdentityIds);
+        Assert.Single(capturedIdentityIds);
+        Assert.Equal(spObjectId, capturedIdentityIds[0]);
+        
+        // Verify that FetchRoleAssignmentsForPrincipalsAsync was called once (only for identity, no groups)
+        _resourceGraphServiceMock.Verify(
+            s => s.FetchRoleAssignmentsForPrincipalsAsync(It.IsAny<List<string>>()),
+            Times.Once);
     }
 
     /// <summary>
@@ -201,10 +214,16 @@ public class AzureRoleAssignmentServiceTests
 
 
         // Setup: Resource graph service to capture the principal IDs
-        List<string>? capturedPrincipalIds = null;
+        List<string>? capturedIdentityIds = null;
+        List<string>? capturedGroupIds = null;
         _resourceGraphServiceMock
-            .Setup(s => s.FetchRoleAssignmentsForPrincipalsAsync(It.IsAny<List<string>>()))
-            .Callback<List<string>>(ids => capturedPrincipalIds = ids)
+            .Setup(s => s.FetchRoleAssignmentsForPrincipalsAsync(It.Is<List<string>>(ids => ids.Contains(spObjectId) && ids.Count == 1)))
+            .Callback<List<string>>(ids => capturedIdentityIds = ids)
+            .ReturnsAsync(new List<AzureRoleAssignmentDto>());
+        
+        _resourceGraphServiceMock
+            .Setup(s => s.FetchRoleAssignmentsForPrincipalsAsync(It.Is<List<string>>(ids => !ids.Contains(spObjectId))))
+            .Callback<List<string>>(ids => capturedGroupIds = ids)
             .ReturnsAsync(new List<AzureRoleAssignmentDto>());
 
         // Setup: API permissions service returns empty list
@@ -218,17 +237,18 @@ public class AzureRoleAssignmentServiceTests
         await service.GetRoleAssignmentsAsync(identity);
 
         // Assert
-        Assert.NotNull(capturedPrincipalIds);
+        Assert.NotNull(capturedIdentityIds);
+        Assert.NotNull(capturedGroupIds);
 
-        // Verify all expected identities are included
-        Assert.Contains(spObjectId, capturedPrincipalIds);     // SP ObjectId
-        Assert.Contains(groupAId, capturedPrincipalIds);       // Direct group A
-        Assert.Contains(groupBId, capturedPrincipalIds);       // Direct group B  
-        Assert.Contains(sharedParentId, capturedPrincipalIds); // Shared parent group
+        // Verify identity call
+        Assert.Single(capturedIdentityIds);
+        Assert.Equal(spObjectId, capturedIdentityIds[0]);
 
-        // Verify total count is correct (SP + group A + group B + shared parent = 4)
-        // Note: The current implementation may include duplicates, but this test verifies the expected behavior
-        Assert.Equal(4, capturedPrincipalIds.Count);
+        // Verify all expected groups are included (unique)
+        Assert.Contains(groupAId, capturedGroupIds);       // Direct group A
+        Assert.Contains(groupBId, capturedGroupIds);       // Direct group B  
+        Assert.Contains(sharedParentId, capturedGroupIds); // Shared parent group
+        Assert.Equal(3, capturedGroupIds.Count);
     }
 
     /// <summary>
@@ -267,10 +287,16 @@ public class AzureRoleAssignmentServiceTests
 
 
         // Setup: Resource graph service to capture the principal IDs
-        List<string>? capturedPrincipalIds = null;
+        List<string>? capturedIdentityIds = null;
+        List<string>? capturedGroupIds = null;
         _resourceGraphServiceMock
-            .Setup(s => s.FetchRoleAssignmentsForPrincipalsAsync(It.IsAny<List<string>>()))
-            .Callback<List<string>>(ids => capturedPrincipalIds = ids)
+            .Setup(s => s.FetchRoleAssignmentsForPrincipalsAsync(It.Is<List<string>>(ids => ids.Contains(spObjectId) && ids.Count == 1)))
+            .Callback<List<string>>(ids => capturedIdentityIds = ids)
+            .ReturnsAsync(new List<AzureRoleAssignmentDto>());
+        
+        _resourceGraphServiceMock
+            .Setup(s => s.FetchRoleAssignmentsForPrincipalsAsync(It.Is<List<string>>(ids => !ids.Contains(spObjectId))))
+            .Callback<List<string>>(ids => capturedGroupIds = ids)
             .ReturnsAsync(new List<AzureRoleAssignmentDto>());
 
         // Setup: API permissions service returns empty list
@@ -284,15 +310,17 @@ public class AzureRoleAssignmentServiceTests
         await service.GetRoleAssignmentsAsync(identity);
 
         // Assert
-        Assert.NotNull(capturedPrincipalIds);
+        Assert.NotNull(capturedIdentityIds);
+        Assert.NotNull(capturedGroupIds);
 
-        // Verify all levels are included
-        Assert.Contains(spObjectId, capturedPrincipalIds);
-        Assert.Contains(groupLevel1Id, capturedPrincipalIds);
-        Assert.Contains(groupLevel2Id, capturedPrincipalIds);
-        Assert.Contains(groupLevel3Id, capturedPrincipalIds);
+        // Verify identity call
+        Assert.Single(capturedIdentityIds);
+        Assert.Equal(spObjectId, capturedIdentityIds[0]);
 
-        // Verify total count is correct (SP + 3 group levels = 4)
-        Assert.Equal(4, capturedPrincipalIds.Count);
+        // Verify all group levels are included
+        Assert.Contains(groupLevel1Id, capturedGroupIds);
+        Assert.Contains(groupLevel2Id, capturedGroupIds);
+        Assert.Contains(groupLevel3Id, capturedGroupIds);
+        Assert.Equal(3, capturedGroupIds.Count);
     }
 }

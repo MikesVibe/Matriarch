@@ -7,6 +7,13 @@ public interface IRoleAssignmentService
     Task<IdentityRoleAssignmentResult> GetRoleAssignmentsAsync(Identity identity);
     Task<(IdentityRoleAssignmentResult result, TimeSpan elapsedTime)> GetRoleAssignmentsAsync(Identity identity, bool useParallelProcessing);
     Task<IdentitySearchResult> SearchIdentitiesAsync(string searchInput);
+    
+    // Separate methods for sequential loading
+    Task<List<RoleAssignment>> GetDirectRoleAssignmentsAsync(Identity identity);
+    Task<List<SecurityGroup>> GetDirectGroupsAsync(Identity identity);
+    Task<List<SecurityGroup>> GetIndirectGroupsAsync(List<SecurityGroup> directGroups);
+    Task<List<ApiPermission>> GetApiPermissionsAsync(Identity identity);
+    Task PopulateGroupRoleAssignmentsAsync(List<SecurityGroup> directGroups, List<SecurityGroup> indirectGroups);
 }
 
 public class MockRoleAssignmentService : IRoleAssignmentService
@@ -130,5 +137,32 @@ public class MockRoleAssignmentService : IRoleAssignmentService
         };
 
         return Task.FromResult(searchResult);
+    }
+
+    public Task<List<RoleAssignment>> GetDirectRoleAssignmentsAsync(Identity identity)
+    {
+        return Task.FromResult(_mockRoleAssignments);
+    }
+
+    public Task<List<SecurityGroup>> GetDirectGroupsAsync(Identity identity)
+    {
+        return Task.FromResult(_mockSecurityGroups.Take(2).ToList());
+    }
+
+    public Task<List<SecurityGroup>> GetIndirectGroupsAsync(List<SecurityGroup> directGroups)
+    {
+        // Return parent groups from the mock data
+        return Task.FromResult(_mockSecurityGroups.Skip(2).ToList());
+    }
+
+    public async Task<List<ApiPermission>> GetApiPermissionsAsync(Identity identity)
+    {
+        return await _apiPermissionsService.GetApiPermissionsAsync(identity);
+    }
+
+    public Task PopulateGroupRoleAssignmentsAsync(List<SecurityGroup> directGroups, List<SecurityGroup> indirectGroups)
+    {
+        // Mock service already has role assignments populated
+        return Task.CompletedTask;
     }
 }

@@ -486,12 +486,47 @@
         errorMessage = null;
         result = null;
         processingTime = null;
+        
+        var totalStopwatch = System.Diagnostics.Stopwatch.StartNew();
 
         try
         {
-            var (loadedResult, elapsedTime) = await _roleAssignmentService.GetRoleAssignmentsAsync(selectedIdentity, useParallelProcessing);
-            result = loadedResult;
-            processingTime = elapsedTime;
+            // Initialize result with identity
+            result = new IdentityRoleAssignmentResult
+            {
+                Identity = selectedIdentity,
+                DirectRoleAssignments = new List<RoleAssignment>(),
+                SecurityDirectGroups = new List<SecurityGroup>(),
+                SecurityIndirectGroups = new List<SecurityGroup>(),
+                ApiPermissions = new List<ApiPermission>()
+            };
+            StateHasChanged(); // Update UI to show identity info
+            
+            // Step 1: Load direct role assignments
+            result.DirectRoleAssignments = await _roleAssignmentService.GetDirectRoleAssignmentsAsync(selectedIdentity);
+            StateHasChanged(); // Update UI to show direct role assignments
+            
+            // Step 2: Load direct groups
+            result.SecurityDirectGroups = await _roleAssignmentService.GetDirectGroupsAsync(selectedIdentity);
+            StateHasChanged(); // Update UI to show direct groups
+            
+            // Step 3: Load indirect groups (transitive)
+            result.SecurityIndirectGroups = await _roleAssignmentService.GetIndirectGroupsAsync(result.SecurityDirectGroups);
+            StateHasChanged(); // Update UI to show indirect groups
+            
+            // Step 4: Load API permissions (in parallel with group role assignments)
+            var apiPermissionsTask = _roleAssignmentService.GetApiPermissionsAsync(selectedIdentity);
+            
+            // Step 5: Populate group role assignments
+            await _roleAssignmentService.PopulateGroupRoleAssignmentsAsync(result.SecurityDirectGroups, result.SecurityIndirectGroups);
+            StateHasChanged(); // Update UI to show group role assignments
+            
+            // Wait for API permissions to complete
+            result.ApiPermissions = await apiPermissionsTask;
+            StateHasChanged(); // Update UI to show API permissions
+            
+            totalStopwatch.Stop();
+            processingTime = totalStopwatch.Elapsed;
         }
         catch (Exception ex)
         {

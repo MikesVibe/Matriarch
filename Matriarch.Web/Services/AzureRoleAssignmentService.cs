@@ -47,16 +47,11 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             _logger.LogInformation("Found {DirectCount} direct groups and {TotalCount} total groups (including indirect)",
                 directGroups.Count, parentGroups.Count);
 
-            // Step 2: Fetch role assignments for principal and ALL groups (direct and indirect)
-            var principalIds = new List<string> { identity.ObjectId };
-            principalIds.AddRange(directGroups.Select(x => x.Id));
-            principalIds.AddRange(parentGroups.Select(x => x.Id));
+            // Step 2: Fetch role assignments for the identity
+            var identityRoleAssignments = await _resourceGraphService.FetchRoleAssignmentsForPrincipalsAsync(
+                new List<string> { identity.ObjectId });
 
-            var roleAssignments = await _resourceGraphService.FetchRoleAssignmentsForPrincipalsAsync(principalIds);
-
-            // Filter direct role assignments (only for the user/service principal)
-            var directRoleAssignments = roleAssignments
-                .Where(ra => ra.PrincipalId == identity.ObjectId)
+            var directRoleAssignments = identityRoleAssignments
                 .Select(ra => new RoleAssignment
                 {
                     Id = ra.Id,
@@ -66,11 +61,22 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                 })
                 .ToList();
 
-            // Step 3: Add role assignments to security groups
-            AddRoleAssignmentsToGroups(directGroups, roleAssignments);
-            AddRoleAssignmentsToGroups(parentGroups, roleAssignments);
+            // Step 3: Fetch role assignments for groups separately (only if there are groups)
+            var groupIds = directGroups.Select(x => x.Id)
+                .Concat(parentGroups.Select(x => x.Id))
+                .Distinct()
+                .ToList();
 
-            // Step 4: Fetch API permissions (only for service principals and managed identities)
+            if (groupIds.Count > 0)
+            {
+                var groupRoleAssignments = await _resourceGraphService.FetchRoleAssignmentsForPrincipalsAsync(groupIds);
+
+                // Step 4: Add role assignments to security groups
+                AddRoleAssignmentsToGroups(directGroups, groupRoleAssignments);
+                AddRoleAssignmentsToGroups(parentGroups, groupRoleAssignments);
+            }
+
+            // Step 5: Fetch API permissions (only for service principals and managed identities)
             var apiPermissions = await _apiPermissionsService.GetApiPermissionsAsync(identity);
 
             totalStopwatch.Stop();
@@ -96,6 +102,64 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
     public async Task<IdentitySearchResult> SearchIdentitiesAsync(string searchInput)
     {
         return await _identityService.SearchIdentitiesAsync(searchInput);
+    }
+
+    public async Task<List<RoleAssignment>> GetDirectRoleAssignmentsAsync(Identity identity)
+    {
+        _logger.LogInformation("Fetching direct role assignments for identity: {Name} ({ObjectId})", identity.Name, identity.ObjectId);
+        
+        var identityRoleAssignments = await _resourceGraphService.FetchRoleAssignmentsForPrincipalsAsync(
+            new List<string> { identity.ObjectId });
+
+        return identityRoleAssignments
+            .Select(ra => new RoleAssignment
+            {
+                Id = ra.Id,
+                RoleName = ra.RoleName,
+                Scope = ra.Scope,
+                AssignedTo = "Direct Assignment"
+            })
+            .ToList();
+    }
+
+    public async Task<List<SecurityGroup>> GetDirectGroupsAsync(Identity identity)
+    {
+        _logger.LogInformation("Fetching direct groups for identity: {Name} ({ObjectId})", identity.Name, identity.ObjectId);
+        
+        return await _groupManagementService.GetGroupMembershipsAsync(identity);
+    }
+
+    public async Task<List<SecurityGroup>> GetIndirectGroupsAsync(List<SecurityGroup> directGroups)
+    {
+        _logger.LogInformation("Fetching indirect groups for {Count} direct groups", directGroups.Count);
+        
+        return await _groupManagementService.GetTransitiveGroupsAsync(directGroups);
+    }
+
+    public async Task<List<ApiPermission>> GetApiPermissionsAsync(Identity identity)
+    {
+        _logger.LogInformation("Fetching API permissions for identity: {Name} ({ObjectId})", identity.Name, identity.ObjectId);
+        
+        return await _apiPermissionsService.GetApiPermissionsAsync(identity);
+    }
+
+    public async Task PopulateGroupRoleAssignmentsAsync(List<SecurityGroup> directGroups, List<SecurityGroup> indirectGroups)
+    {
+        _logger.LogInformation("Populating role assignments for {DirectCount} direct and {IndirectCount} indirect groups", 
+            directGroups.Count, indirectGroups.Count);
+
+        var groupIds = directGroups.Select(x => x.Id)
+            .Concat(indirectGroups.Select(x => x.Id))
+            .Distinct()
+            .ToList();
+
+        if (groupIds.Count > 0)
+        {
+            var groupRoleAssignments = await _resourceGraphService.FetchRoleAssignmentsForPrincipalsAsync(groupIds);
+            
+            AddRoleAssignmentsToGroups(directGroups, groupRoleAssignments);
+            AddRoleAssignmentsToGroups(indirectGroups, groupRoleAssignments);
+        }
     }
 
     private void AddRoleAssignmentsToGroups(List<SecurityGroup> groups, List<AzureRoleAssignmentDto> roleAssignments)
