@@ -1,5 +1,6 @@
-using Microsoft.Extensions.Logging;
 using Matriarch.Web.Models;
+using Microsoft.Extensions.Logging;
+using System.Collections.Generic;
 
 namespace Matriarch.Web.Services;
 
@@ -44,36 +45,34 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             var parentGroups = await _groupManagementService.GetTransitiveGroupsAsync(directGroups);
 
 
-            //var (parentGroupIds, groupInfoMap, groupHierarchyTime) = await _groupManagementService.GetParentGroupsAsync(directGroupIds, useParallelProcessing);
+            _logger.LogInformation("Found {DirectCount} direct groups and {TotalCount} total groups (including indirect)",
+                directGroups.Count, parentGroups.Count);
 
-            //_logger.LogInformation("Found {DirectCount} direct groups and {TotalCount} total groups (including indirect) in {ElapsedMs}ms", 
-            //    directGroupIds.Count, parentGroupIds.Count, groupHierarchyTime.TotalMilliseconds);
+            // Step 2: Fetch role assignments for principal and ALL groups (direct and indirect)
+            var principalIds = new List<string> { identity.ObjectId };
+            principalIds.AddRange(directGroups.Select(x => x.Id));
+            principalIds.AddRange(parentGroups.Select(x => x.Id));
 
-            //// Step 2: Fetch role assignments for principal and ALL groups (direct and indirect)
-            //var principalIds = new List<string> { identity.ObjectId };
-            //principalIds.AddRange(parentGroupIds);
-            //principalIds.AddRange(directGroupIds);
-            
-            //var roleAssignments = await _resourceGraphService.FetchRoleAssignmentsForPrincipalsAsync(principalIds);
-            
-            //// Filter direct role assignments (only for the user/service principal)
-            //var directRoleAssignments = roleAssignments
-            //    .Where(ra => ra.PrincipalId == identity.ObjectId)
-            //    .Select(ra => new RoleAssignment
-            //    {
-            //        Id = ra.Id,
-            //        RoleName = ra.RoleName,
-            //        Scope = ra.Scope,
-            //        AssignedTo = "Direct Assignment"
-            //    })
-            //    .ToList();
+            var roleAssignments = await _resourceGraphService.FetchRoleAssignmentsForPrincipalsAsync(principalIds);
 
-            //// Step 3: Build security group hierarchy with role assignments using pre-fetched group info
-            //var securityDirectGroups = _groupManagementService.BuildSecurityGroupsWithPreFetchedData(directGroupIds, groupInfoMap, roleAssignments);
-            //var securityIndirectGroups = _groupManagementService.BuildSecurityGroupsWithPreFetchedData(parentGroupIds, groupInfoMap, roleAssignments);
+            // Filter direct role assignments (only for the user/service principal)
+            var directRoleAssignments = roleAssignments
+                .Where(ra => ra.PrincipalId == identity.ObjectId)
+                .Select(ra => new RoleAssignment
+                {
+                    Id = ra.Id,
+                    RoleName = ra.RoleName,
+                    Scope = ra.Scope,
+                    AssignedTo = "Direct Assignment"
+                })
+                .ToList();
 
-            //// Step 4: Fetch API permissions (only for service principals and managed identities)
-            //var apiPermissions = await _apiPermissionsService.GetApiPermissionsAsync(identity);
+            // Step 3: Build security group hierarchy with role assignments using pre-fetched group info
+            var securityDirectGroups = _groupManagementService.BuildSecurityGroupsWithPreFetchedData(directGroupIds, groupInfoMap, roleAssignments);
+            var securityIndirectGroups = _groupManagementService.BuildSecurityGroupsWithPreFetchedData(parentGroupIds, groupInfoMap, roleAssignments);
+
+            // Step 4: Fetch API permissions (only for service principals and managed identities)
+            var apiPermissions = await _apiPermissionsService.GetApiPermissionsAsync(identity);
 
             totalStopwatch.Stop();
 
