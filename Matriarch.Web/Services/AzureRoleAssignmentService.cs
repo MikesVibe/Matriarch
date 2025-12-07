@@ -44,7 +44,6 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             var directGroups = await _groupManagementService.GetGroupMembershipsAsync(identity);
             var parentGroups = await _groupManagementService.GetTransitiveGroupsAsync(directGroups);
 
-
             _logger.LogInformation("Found {DirectCount} direct groups and {TotalCount} total groups (including indirect)",
                 directGroups.Count, parentGroups.Count);
 
@@ -67,9 +66,9 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
                 })
                 .ToList();
 
-            // Step 3: Build security group hierarchy with role assignments using pre-fetched group info
-            var securityDirectGroups = _groupManagementService.BuildSecurityGroupsWithPreFetchedData(directGroupIds, groupInfoMap, roleAssignments);
-            var securityIndirectGroups = _groupManagementService.BuildSecurityGroupsWithPreFetchedData(parentGroupIds, groupInfoMap, roleAssignments);
+            // Step 3: Add role assignments to security groups
+            AddRoleAssignmentsToGroups(directGroups, roleAssignments);
+            AddRoleAssignmentsToGroups(parentGroups, roleAssignments);
 
             // Step 4: Fetch API permissions (only for service principals and managed identities)
             var apiPermissions = await _apiPermissionsService.GetApiPermissionsAsync(identity);
@@ -79,10 +78,10 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             var result = new IdentityRoleAssignmentResult
             {
                 Identity = identity,
-                //DirectRoleAssignments = directRoleAssignments,
+                DirectRoleAssignments = directRoleAssignments,
                 SecurityDirectGroups = directGroups,
                 SecurityIndirectGroups = parentGroups,
-                //ApiPermissions = apiPermissions
+                ApiPermissions = apiPermissions
             };
 
             return (result, totalStopwatch.Elapsed);
@@ -97,5 +96,22 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
     public async Task<IdentitySearchResult> SearchIdentitiesAsync(string searchInput)
     {
         return await _identityService.SearchIdentitiesAsync(searchInput);
+    }
+
+    private void AddRoleAssignmentsToGroups(List<SecurityGroup> groups, List<AzureRoleAssignmentDto> roleAssignments)
+    {
+        foreach (var group in groups)
+        {
+            group.RoleAssignments = roleAssignments
+                .Where(ra => ra.PrincipalId == group.Id)
+                .Select(ra => new RoleAssignment
+                {
+                    Id = ra.Id,
+                    RoleName = ra.RoleName,
+                    Scope = ra.Scope,
+                    AssignedTo = group.DisplayName
+                })
+                .ToList();
+        }
     }
 }
