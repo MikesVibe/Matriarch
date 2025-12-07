@@ -41,4 +41,7 @@ public class ParallelizationSettings
     public int MaxDegreeOfParallelism { get; set; } = 4;
     public int MaxRetryAttempts { get; set; } = 3;
     public int RetryDelayMilliseconds { get; set; } = 1000;
+    public int MaxConcurrentTransitiveGroupRequests { get; set; } = 5;
+    public int TransitiveGroupBatchSize { get; set; } = 10;
+    public int DelayBetweenBatchesMilliseconds { get; set; } = 100;
 }
