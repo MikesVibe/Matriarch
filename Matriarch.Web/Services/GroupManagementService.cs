@@ -11,10 +11,10 @@ namespace Matriarch.Web.Services;
 
 public interface IGroupManagementService
 {
-    Task<List<string>> GetGroupMembershipsAsync(Models.Identity identity);
+    Task<List<SecurityGroup>> GetGroupMembershipsAsync(Models.Identity identity);
     Task<(List<string> parentGroupIds, Dictionary<string, GroupInfo> groupInfoMap)> GetParentGroupsAsync(List<string> directGroupIds);
     Task<(List<string> parentGroupIds, Dictionary<string, GroupInfo> groupInfoMap, TimeSpan elapsedTime)> GetParentGroupsAsync(List<string> directGroupIds, bool useParallelProcessing);
-    Task<Dictionary<string, List<string>>> GetTransitiveGroupsAsync(List<string> directGroupIds);
+    Task<List<SecurityGroup>> GetTransitiveGroupsAsync(List<SecurityGroup> directGroupIds);
     List<SecurityGroup> BuildSecurityGroupsWithPreFetchedData(List<string> directGroupIds, Dictionary<string, GroupInfo> groupInfoMap, List<AzureRoleAssignmentDto> roleAssignments);
 }
 
@@ -58,9 +58,9 @@ public class GroupManagementService : IGroupManagementService
         _graphClient = new GraphServiceClient(credential);
     }
 
-    public async Task<List<string>> GetGroupMembershipsAsync(Models.Identity identity)
+    public async Task<List<SecurityGroup>> GetGroupMembershipsAsync(Models.Identity identity)
     {
-        var groupIds = new List<string>();
+        var groupIds = new List<SecurityGroup>();
 
         try
         {
@@ -86,7 +86,7 @@ public class GroupManagementService : IGroupManagementService
                 {
                     if (directoryObject is Group group && group.SecurityEnabled == true && !string.IsNullOrEmpty(group.Id))
                     {
-                        groupIds.Add(group.Id);
+                        groupIds.Add(new SecurityGroup() { Id = group.Id, DisplayName = group?.DisplayName ?? ""});
                     }
                 }
             }
@@ -101,14 +101,14 @@ public class GroupManagementService : IGroupManagementService
         return groupIds;
     }
 
-    private async Task<DirectoryObjectCollectionResponse?> HandleGroupIdentityAsync(string groupId, List<string> groupIds)
+    private async Task<DirectoryObjectCollectionResponse?> HandleGroupIdentityAsync(string groupId, List<SecurityGroup> groups)
     {
         // For a group identity, verify it exists and is a security group
         var group = await _graphClient.Groups[groupId].GetAsync();
         if (group != null && group.SecurityEnabled == true)
         {
             // For a group, we treat it as being "member" of itself for role assignment purposes
-            groupIds.Add(groupId);
+            groups.Add(new SecurityGroup() { Id = group?.Id ?? "", DisplayName = group?.DisplayName ?? ""});
             _logger.LogInformation("Identity is a group, will fetch its role assignments");
         }
         // Return null as groups don't have memberOf in this context
@@ -121,16 +121,15 @@ public class GroupManagementService : IGroupManagementService
         return (result.parentGroupIds, result.groupInfoMap);
     }
 
-    public async Task<Dictionary<string, List<string>>> GetTransitiveGroupsAsync(List<string> directGroupIds)
+    public async Task<List<SecurityGroup>> GetTransitiveGroupsAsync(List<SecurityGroup> directGroupIds)
     {
         _logger.LogInformation("Fetching transitive groups for {Count} direct groups", directGroupIds.Count);
         
-        var result = new Dictionary<string, List<string>>();
+        var result = new List<SecurityGroup>();
 
-        foreach (var groupId in directGroupIds)
+        foreach (var group in directGroupIds)
         {
-            var transitiveGroupIds = new List<string>();
-            
+            var groupId = group.Id;
             try
             {
                 _logger.LogDebug("Fetching transitive members for group {GroupId}", groupId);
@@ -149,18 +148,16 @@ public class GroupManagementService : IGroupManagementService
                             parentGroup.SecurityEnabled == true && 
                             !string.IsNullOrEmpty(parentGroup.Id))
                         {
-                            transitiveGroupIds.Add(parentGroup.Id);
+                            result.Add(new SecurityGroup() { Id = parentGroup.Id, DisplayName = parentGroup?.DisplayName ?? "" });
                         }
                     }
                 }
 
-                result[groupId] = transitiveGroupIds;
-                _logger.LogDebug("Found {Count} transitive groups for group {GroupId}", transitiveGroupIds.Count, groupId);
+                //_logger.LogDebug("Found {Count} transitive groups for group {GroupId}", transitiveGroupIds.Count, groupId);
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Error fetching transitive groups for {GroupId}", groupId);
-                result[groupId] = transitiveGroupIds; // Add empty list on error
             }
         }
 

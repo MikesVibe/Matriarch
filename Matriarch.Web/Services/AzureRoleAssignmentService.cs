@@ -40,15 +40,9 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
         try
         {
             // Step 1: Get direct group memberships
-            var directGroupIds = await _groupManagementService.GetGroupMembershipsAsync(identity);
-            var parentGroupIdsDictonary = await _groupManagementService.GetTransitiveGroupsAsync(directGroupIds);
+            var directGroups = await _groupManagementService.GetGroupMembershipsAsync(identity);
+            var parentGroups = await _groupManagementService.GetTransitiveGroupsAsync(directGroups);
 
-            // Flatten all transitive group IDs into a single list
-            var allTransitiveGroupIds = parentGroupIdsDictonary.Values
-                .SelectMany(groupIds => groupIds)
-                .Distinct()
-                .Select(x => new SecurityGroup() { Id = x })
-                .ToList();
 
             //var (parentGroupIds, groupInfoMap, groupHierarchyTime) = await _groupManagementService.GetParentGroupsAsync(directGroupIds, useParallelProcessing);
 
@@ -87,8 +81,8 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
             {
                 Identity = identity,
                 //DirectRoleAssignments = directRoleAssignments,
-                SecurityDirectGroups = directGroupIds.Select(x => new SecurityGroup() { Id = x }).ToList(),
-                SecurityIndirectGroups = allTransitiveGroupIds,
+                SecurityDirectGroups = directGroups,
+                SecurityIndirectGroups = parentGroups,
                 //ApiPermissions = apiPermissions
             };
 
