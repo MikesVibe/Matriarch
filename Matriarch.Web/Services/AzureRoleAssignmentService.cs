@@ -41,47 +41,55 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
         {
             // Step 1: Get direct group memberships
             var directGroupIds = await _groupManagementService.GetGroupMembershipsAsync(identity);
-            
-            var (parentGroupIds, groupInfoMap, groupHierarchyTime) = await _groupManagementService.GetParentGroupsAsync(directGroupIds, useParallelProcessing);
+            var parentGroupIdsDictonary = await _groupManagementService.GetTransitiveGroupsAsync(directGroupIds);
 
-            _logger.LogInformation("Found {DirectCount} direct groups and {TotalCount} total groups (including indirect) in {ElapsedMs}ms", 
-                directGroupIds.Count, parentGroupIds.Count, groupHierarchyTime.TotalMilliseconds);
-
-            // Step 2: Fetch role assignments for principal and ALL groups (direct and indirect)
-            var principalIds = new List<string> { identity.ObjectId };
-            principalIds.AddRange(parentGroupIds);
-            principalIds.AddRange(directGroupIds);
-            
-            var roleAssignments = await _resourceGraphService.FetchRoleAssignmentsForPrincipalsAsync(principalIds);
-            
-            // Filter direct role assignments (only for the user/service principal)
-            var directRoleAssignments = roleAssignments
-                .Where(ra => ra.PrincipalId == identity.ObjectId)
-                .Select(ra => new RoleAssignment
-                {
-                    Id = ra.Id,
-                    RoleName = ra.RoleName,
-                    Scope = ra.Scope,
-                    AssignedTo = "Direct Assignment"
-                })
+            // Flatten all transitive group IDs into a single list
+            var allTransitiveGroupIds = parentGroupIdsDictonary.Values
+                .SelectMany(groupIds => groupIds)
+                .Distinct()
+                .Select(x => new SecurityGroup() { Id = x })
                 .ToList();
 
-            // Step 3: Build security group hierarchy with role assignments using pre-fetched group info
-            var securityDirectGroups = _groupManagementService.BuildSecurityGroupsWithPreFetchedData(directGroupIds, groupInfoMap, roleAssignments);
-            var securityIndirectGroups = _groupManagementService.BuildSecurityGroupsWithPreFetchedData(parentGroupIds, groupInfoMap, roleAssignments);
+            //var (parentGroupIds, groupInfoMap, groupHierarchyTime) = await _groupManagementService.GetParentGroupsAsync(directGroupIds, useParallelProcessing);
 
-            // Step 4: Fetch API permissions (only for service principals and managed identities)
-            var apiPermissions = await _apiPermissionsService.GetApiPermissionsAsync(identity);
+            //_logger.LogInformation("Found {DirectCount} direct groups and {TotalCount} total groups (including indirect) in {ElapsedMs}ms", 
+            //    directGroupIds.Count, parentGroupIds.Count, groupHierarchyTime.TotalMilliseconds);
+
+            //// Step 2: Fetch role assignments for principal and ALL groups (direct and indirect)
+            //var principalIds = new List<string> { identity.ObjectId };
+            //principalIds.AddRange(parentGroupIds);
+            //principalIds.AddRange(directGroupIds);
+            
+            //var roleAssignments = await _resourceGraphService.FetchRoleAssignmentsForPrincipalsAsync(principalIds);
+            
+            //// Filter direct role assignments (only for the user/service principal)
+            //var directRoleAssignments = roleAssignments
+            //    .Where(ra => ra.PrincipalId == identity.ObjectId)
+            //    .Select(ra => new RoleAssignment
+            //    {
+            //        Id = ra.Id,
+            //        RoleName = ra.RoleName,
+            //        Scope = ra.Scope,
+            //        AssignedTo = "Direct Assignment"
+            //    })
+            //    .ToList();
+
+            //// Step 3: Build security group hierarchy with role assignments using pre-fetched group info
+            //var securityDirectGroups = _groupManagementService.BuildSecurityGroupsWithPreFetchedData(directGroupIds, groupInfoMap, roleAssignments);
+            //var securityIndirectGroups = _groupManagementService.BuildSecurityGroupsWithPreFetchedData(parentGroupIds, groupInfoMap, roleAssignments);
+
+            //// Step 4: Fetch API permissions (only for service principals and managed identities)
+            //var apiPermissions = await _apiPermissionsService.GetApiPermissionsAsync(identity);
 
             totalStopwatch.Stop();
 
             var result = new IdentityRoleAssignmentResult
             {
                 Identity = identity,
-                DirectRoleAssignments = directRoleAssignments,
-                SecurityDirectGroups = securityDirectGroups,
-                SecurityIndirectGroups = securityIndirectGroups,
-                ApiPermissions = apiPermissions
+                //DirectRoleAssignments = directRoleAssignments,
+                SecurityDirectGroups = directGroupIds.Select(x => new SecurityGroup() { Id = x }).ToList(),
+                SecurityIndirectGroups = allTransitiveGroupIds,
+                //ApiPermissions = apiPermissions
             };
 
             return (result, totalStopwatch.Elapsed);

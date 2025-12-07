@@ -14,6 +14,7 @@ public interface IGroupManagementService
     Task<List<string>> GetGroupMembershipsAsync(Models.Identity identity);
     Task<(List<string> parentGroupIds, Dictionary<string, GroupInfo> groupInfoMap)> GetParentGroupsAsync(List<string> directGroupIds);
     Task<(List<string> parentGroupIds, Dictionary<string, GroupInfo> groupInfoMap, TimeSpan elapsedTime)> GetParentGroupsAsync(List<string> directGroupIds, bool useParallelProcessing);
+    Task<Dictionary<string, List<string>>> GetTransitiveGroupsAsync(List<string> directGroupIds);
     List<SecurityGroup> BuildSecurityGroupsWithPreFetchedData(List<string> directGroupIds, Dictionary<string, GroupInfo> groupInfoMap, List<AzureRoleAssignmentDto> roleAssignments);
 }
 
@@ -118,6 +119,53 @@ public class GroupManagementService : IGroupManagementService
     {
         var result = await GetParentGroupsAsync(directGroupIds, _settings.Parallelization.EnableParallelProcessing);
         return (result.parentGroupIds, result.groupInfoMap);
+    }
+
+    public async Task<Dictionary<string, List<string>>> GetTransitiveGroupsAsync(List<string> directGroupIds)
+    {
+        _logger.LogInformation("Fetching transitive groups for {Count} direct groups", directGroupIds.Count);
+        
+        var result = new Dictionary<string, List<string>>();
+
+        foreach (var groupId in directGroupIds)
+        {
+            var transitiveGroupIds = new List<string>();
+            
+            try
+            {
+                _logger.LogDebug("Fetching transitive members for group {GroupId}", groupId);
+                
+                // Use TransitiveMemberOf to get all parent groups (direct and indirect)
+                var transitiveMemberOfPage = await _graphClient.Groups[groupId].TransitiveMemberOf.GetAsync(config =>
+                {
+                    config.QueryParameters.Top = MaxGraphPageSize;
+                });
+
+                if (transitiveMemberOfPage?.Value != null)
+                {
+                    foreach (var directoryObject in transitiveMemberOfPage.Value)
+                    {
+                        if (directoryObject is Group parentGroup && 
+                            parentGroup.SecurityEnabled == true && 
+                            !string.IsNullOrEmpty(parentGroup.Id))
+                        {
+                            transitiveGroupIds.Add(parentGroup.Id);
+                        }
+                    }
+                }
+
+                result[groupId] = transitiveGroupIds;
+                _logger.LogDebug("Found {Count} transitive groups for group {GroupId}", transitiveGroupIds.Count, groupId);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error fetching transitive groups for {GroupId}", groupId);
+                result[groupId] = transitiveGroupIds; // Add empty list on error
+            }
+        }
+
+        _logger.LogInformation("Completed fetching transitive groups for {Count} direct groups", directGroupIds.Count);
+        return result;
     }
 
     public async Task<(List<string> parentGroupIds, Dictionary<string, GroupInfo> groupInfoMap, TimeSpan elapsedTime)> GetParentGroupsAsync(List<string> directGroupIds, bool useParallelProcessing)
