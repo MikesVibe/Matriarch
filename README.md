@@ -29,6 +29,7 @@ Unit and integration tests for the Matriarch solution.
   - Real-time data queries from Azure
   - Support for multiple identity search results
   - Detailed role assignment scope information
+  - Optional parallel processing for faster group hierarchy traversal
 
 ## Prerequisites
 
@@ -53,6 +54,12 @@ Create an `appsettings.json` file in the `Matriarch.Web` directory with your Azu
     "ClientId": "your-client-id",
     "ClientSecret": "your-client-secret"
   },
+  "Parallelization": {
+    "EnableParallelProcessing": false,
+    "MaxDegreeOfParallelism": 4,
+    "MaxRetryAttempts": 3,
+    "RetryDelayMilliseconds": 1000
+  },
   "Logging": {
     "LogLevel": {
       "Default": "Information",
@@ -61,6 +68,17 @@ Create an `appsettings.json` file in the `Matriarch.Web` directory with your Azu
   }
 }
 ```
+
+### Parallelization Settings
+
+The `Parallelization` section controls how the application processes group hierarchies:
+
+- **EnableParallelProcessing** (default: `false`): When enabled in configuration, allows users to toggle parallel processing in the UI. Parallel processing can significantly improve performance when dealing with large group hierarchies.
+- **MaxDegreeOfParallelism** (default: `4`): The maximum number of concurrent threads to use when parallel processing is enabled. Adjust based on your system resources and Azure API throttling limits.
+- **MaxRetryAttempts** (default: `3`): The number of retry attempts when Azure API throttling (429) or service unavailable (503) errors occur.
+- **RetryDelayMilliseconds** (default: `1000`): The initial delay in milliseconds before retrying. Uses exponential backoff for subsequent retries.
+
+**Note:** Even when `EnableParallelProcessing` is set to `false` in configuration, users can still enable parallel processing via the UI toggle. The configuration setting only affects the default behavior.
 
 Alternatively, you can use environment variables:
 - `Azure__TenantId`
@@ -99,14 +117,16 @@ Then open your browser and navigate to the URL shown in the console (typically `
    - Object ID (GUID format)
    - Application ID / Client ID (GUID format)
    - Display name (e.g., `John Doe` or `MyApp`)
-2. Click "Load Role Assignments"
-3. If multiple identities match your search, select the correct one from the table
-4. View the comprehensive results:
+2. (Optional) Enable "Parallel Processing" checkbox for faster processing of large group hierarchies
+3. Click "Load Role Assignments"
+4. If multiple identities match your search, select the correct one from the table
+5. View the comprehensive results:
    - Identity type and details (including Managed Identity resource information)
    - Direct role assignments
    - Group memberships (direct and indirect)
    - Role assignments inherited through groups
    - API permissions (for Service Principals and Managed Identities)
+   - Processing time metrics (showing performance difference between parallel and sequential processing)
 
 ## Supported Identity Types
 

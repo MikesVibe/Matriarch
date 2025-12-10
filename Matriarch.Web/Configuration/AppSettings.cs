@@ -6,6 +6,7 @@ public class AppSettings
     public Neo4jSettings Neo4j { get; set; } = new();
     public CacheSettings Cache { get; set; } = new();
     public SqliteSettings Sqlite { get; set; } = new();
+    public ParallelizationSettings Parallelization { get; set; } = new();
 }
 
 public class AzureSettings
@@ -32,4 +33,14 @@ public class CacheSettings
 public class SqliteSettings
 {
     public string DatabasePath { get; set; } = "matriarch.db";
+}
+
+public class ParallelizationSettings
+{
+    public int MaxDegreeOfParallelism { get; set; } = 4;
+    public int MaxRetryAttempts { get; set; } = 3;
+    public int RetryDelayMilliseconds { get; set; } = 1000;
+    public int MaxConcurrentTransitiveGroupRequests { get; set; } = 5;
+    public int TransitiveGroupBatchSize { get; set; } = 10;
+    public int DelayBetweenBatchesMilliseconds { get; set; } = 100;
 }

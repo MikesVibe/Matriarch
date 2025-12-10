@@ -64,33 +64,34 @@ public class AzureRoleAssignmentServiceTests
         var identity = CreateServicePrincipalIdentity(spObjectId, "Test Service Principal", "app-id-123");
 
         // Setup: SP is a direct member of group A
-        var directGroupIds = new List<string> { groupAId };
+        var directGroupIds = new List<SecurityGroup> { new SecurityGroup { Id = groupAId, DisplayName = "Group A" } };
         _groupManagementServiceMock
             .Setup(s => s.GetGroupMembershipsAsync(It.Is<Identity>(i => i.ObjectId == spObjectId)))
             .ReturnsAsync(directGroupIds);
-
-        // Setup: Group A is a member of groups B and C (indirect/parent groups)
-        var parentGroupIds = new List<string> { groupBId, groupCId };
-        var groupInfoMap = new Dictionary<string, GroupInfo>
-        {
-            { groupAId, new GroupInfo { Id = groupAId, DisplayName = "Group A", Description = "Direct group", ParentGroupIds = new List<string> { groupBId, groupCId } } },
-            { groupBId, new GroupInfo { Id = groupBId, DisplayName = "Group B", Description = "Parent group B", ParentGroupIds = new List<string>() } },
-            { groupCId, new GroupInfo { Id = groupCId, DisplayName = "Group C", Description = "Parent group C", ParentGroupIds = new List<string>() } }
+        
+        // Setup: Transitive groups (Group B and C)
+        var transitiveGroups = new List<SecurityGroup> 
+        { 
+            new SecurityGroup { Id = groupBId, DisplayName = "Group B" },
+            new SecurityGroup { Id = groupCId, DisplayName = "Group C" }
         };
         _groupManagementServiceMock
-            .Setup(s => s.GetParentGroupsAsync(directGroupIds))
-            .ReturnsAsync((parentGroupIds, groupInfoMap));
+            .Setup(s => s.GetTransitiveGroupsAsync(It.IsAny<List<SecurityGroup>>()))
+            .ReturnsAsync(transitiveGroups);
 
-        // Setup: Build security groups with pre-fetched data - return empty list as we're only testing FetchRoleAssignmentsForPrincipalsAsync
-        _groupManagementServiceMock
-            .Setup(s => s.BuildSecurityGroupsWithPreFetchedData(It.IsAny<List<string>>(), It.IsAny<Dictionary<string, GroupInfo>>(), It.IsAny<List<AzureRoleAssignmentDto>>()))
-            .Returns(new List<SecurityGroup>());
+
 
         // Setup: Resource graph service to capture the principal IDs
-        List<string>? capturedPrincipalIds = null;
+        List<string>? capturedIdentityIds = null;
+        List<string>? capturedGroupIds = null;
         _resourceGraphServiceMock
-            .Setup(s => s.FetchRoleAssignmentsForPrincipalsAsync(It.IsAny<List<string>>()))
-            .Callback<List<string>>(ids => capturedPrincipalIds = ids)
+            .Setup(s => s.FetchRoleAssignmentsForPrincipalsAsync(It.Is<List<string>>(ids => ids.Contains(spObjectId) && ids.Count == 1)))
+            .Callback<List<string>>(ids => capturedIdentityIds = ids)
+            .ReturnsAsync(new List<AzureRoleAssignmentDto>());
+        
+        _resourceGraphServiceMock
+            .Setup(s => s.FetchRoleAssignmentsForPrincipalsAsync(It.Is<List<string>>(ids => !ids.Contains(spObjectId))))
+            .Callback<List<string>>(ids => capturedGroupIds = ids)
             .ReturnsAsync(new List<AzureRoleAssignmentDto>());
 
         // Setup: API permissions service returns empty list
@@ -104,21 +105,23 @@ public class AzureRoleAssignmentServiceTests
         await service.GetRoleAssignmentsAsync(identity);
 
         // Assert
-        Assert.NotNull(capturedPrincipalIds);
+        Assert.NotNull(capturedIdentityIds);
+        Assert.NotNull(capturedGroupIds);
 
-        // Verify that FetchRoleAssignmentsForPrincipalsAsync was called exactly once
+        // Verify that FetchRoleAssignmentsForPrincipalsAsync was called twice (once for identity, once for groups)
         _resourceGraphServiceMock.Verify(
             s => s.FetchRoleAssignmentsForPrincipalsAsync(It.IsAny<List<string>>()),
-            Times.Once);
+            Times.Exactly(2));
 
-        // Verify all expected identities are included
-        Assert.Contains(spObjectId, capturedPrincipalIds); // SP ObjectId
-        Assert.Contains(groupAId, capturedPrincipalIds);   // Direct group
-        Assert.Contains(groupBId, capturedPrincipalIds);   // Parent group B
-        Assert.Contains(groupCId, capturedPrincipalIds);   // Parent group C
+        // Verify identity call
+        Assert.Single(capturedIdentityIds);
+        Assert.Equal(spObjectId, capturedIdentityIds[0]);
 
-        // Verify total count is correct (SP + group A + group B + group C = 4)
-        Assert.Equal(4, capturedPrincipalIds.Count);
+        // Verify group call includes all groups
+        Assert.Contains(groupAId, capturedGroupIds);   // Direct group
+        Assert.Contains(groupBId, capturedGroupIds);   // Parent group B
+        Assert.Contains(groupCId, capturedGroupIds);   // Parent group C
+        Assert.Equal(3, capturedGroupIds.Count);
     }
 
     /// <summary>
@@ -133,28 +136,24 @@ public class AzureRoleAssignmentServiceTests
         var identity = CreateServicePrincipalIdentity(spObjectId, "Isolated Service Principal", "app-id-456");
 
         // Setup: SP has no direct group memberships
-        var directGroupIds = new List<string>();
+        var directGroupIds = new List<SecurityGroup>();
         _groupManagementServiceMock
             .Setup(s => s.GetGroupMembershipsAsync(It.Is<Identity>(i => i.ObjectId == spObjectId)))
             .ReturnsAsync(directGroupIds);
-
-        // Setup: No parent groups
-        var parentGroupIds = new List<string>();
-        var groupInfoMap = new Dictionary<string, GroupInfo>();
+        
+        // Setup: No transitive groups
+        var transitiveGroups = new List<SecurityGroup>();
         _groupManagementServiceMock
-            .Setup(s => s.GetParentGroupsAsync(directGroupIds))
-            .ReturnsAsync((parentGroupIds, groupInfoMap));
+            .Setup(s => s.GetTransitiveGroupsAsync(It.IsAny<List<SecurityGroup>>()))
+            .ReturnsAsync(transitiveGroups);
 
-        // Setup: Build security groups
-        _groupManagementServiceMock
-            .Setup(s => s.BuildSecurityGroupsWithPreFetchedData(It.IsAny<List<string>>(), It.IsAny<Dictionary<string, GroupInfo>>(), It.IsAny<List<AzureRoleAssignmentDto>>()))
-            .Returns(new List<SecurityGroup>());
+
 
         // Setup: Resource graph service to capture the principal IDs
-        List<string>? capturedPrincipalIds = null;
+        List<string>? capturedIdentityIds = null;
         _resourceGraphServiceMock
-            .Setup(s => s.FetchRoleAssignmentsForPrincipalsAsync(It.IsAny<List<string>>()))
-            .Callback<List<string>>(ids => capturedPrincipalIds = ids)
+            .Setup(s => s.FetchRoleAssignmentsForPrincipalsAsync(It.Is<List<string>>(ids => ids.Contains(spObjectId))))
+            .Callback<List<string>>(ids => capturedIdentityIds = ids)
             .ReturnsAsync(new List<AzureRoleAssignmentDto>());
 
         // Setup: API permissions service returns empty list
@@ -167,10 +166,15 @@ public class AzureRoleAssignmentServiceTests
         // Act
         await service.GetRoleAssignmentsAsync(identity);
 
-        // Assert
-        Assert.NotNull(capturedPrincipalIds);
-        Assert.Single(capturedPrincipalIds);
-        Assert.Equal(spObjectId, capturedPrincipalIds[0]);
+        // Assert - Since there are no groups, only the identity call should happen
+        Assert.NotNull(capturedIdentityIds);
+        Assert.Single(capturedIdentityIds);
+        Assert.Equal(spObjectId, capturedIdentityIds[0]);
+        
+        // Verify that FetchRoleAssignmentsForPrincipalsAsync was called once (only for identity, no groups)
+        _resourceGraphServiceMock.Verify(
+            s => s.FetchRoleAssignmentsForPrincipalsAsync(It.IsAny<List<string>>()),
+            Times.Once);
     }
 
     /// <summary>
@@ -189,33 +193,37 @@ public class AzureRoleAssignmentServiceTests
         var identity = CreateServicePrincipalIdentity(spObjectId, "Test Service Principal", "app-id-789");
 
         // Setup: SP is a direct member of groups A and B
-        var directGroupIds = new List<string> { groupAId, groupBId };
+        var directGroupIds = new List<SecurityGroup> 
+        { 
+            new SecurityGroup { Id = groupAId, DisplayName = "Group A" },
+            new SecurityGroup { Id = groupBId, DisplayName = "Group B" }
+        };
         _groupManagementServiceMock
             .Setup(s => s.GetGroupMembershipsAsync(It.Is<Identity>(i => i.ObjectId == spObjectId)))
             .ReturnsAsync(directGroupIds);
-
-        // Setup: Both groups A and B share the same parent group
-        var parentGroupIds = new List<string> { sharedParentId };
-        var groupInfoMap = new Dictionary<string, GroupInfo>
-        {
-            { groupAId, new GroupInfo { Id = groupAId, DisplayName = "Group A", Description = "Direct group A", ParentGroupIds = new List<string> { sharedParentId } } },
-            { groupBId, new GroupInfo { Id = groupBId, DisplayName = "Group B", Description = "Direct group B", ParentGroupIds = new List<string> { sharedParentId } } },
-            { sharedParentId, new GroupInfo { Id = sharedParentId, DisplayName = "Shared Parent", Description = "Shared parent group", ParentGroupIds = new List<string>() } }
+        
+        // Setup: Transitive groups (shared parent)
+        var transitiveGroups = new List<SecurityGroup> 
+        { 
+            new SecurityGroup { Id = sharedParentId, DisplayName = "Shared Parent" }
         };
         _groupManagementServiceMock
-            .Setup(s => s.GetParentGroupsAsync(directGroupIds))
-            .ReturnsAsync((parentGroupIds, groupInfoMap));
+            .Setup(s => s.GetTransitiveGroupsAsync(It.IsAny<List<SecurityGroup>>()))
+            .ReturnsAsync(transitiveGroups);
 
-        // Setup: Build security groups
-        _groupManagementServiceMock
-            .Setup(s => s.BuildSecurityGroupsWithPreFetchedData(It.IsAny<List<string>>(), It.IsAny<Dictionary<string, GroupInfo>>(), It.IsAny<List<AzureRoleAssignmentDto>>()))
-            .Returns(new List<SecurityGroup>());
+
 
         // Setup: Resource graph service to capture the principal IDs
-        List<string>? capturedPrincipalIds = null;
+        List<string>? capturedIdentityIds = null;
+        List<string>? capturedGroupIds = null;
         _resourceGraphServiceMock
-            .Setup(s => s.FetchRoleAssignmentsForPrincipalsAsync(It.IsAny<List<string>>()))
-            .Callback<List<string>>(ids => capturedPrincipalIds = ids)
+            .Setup(s => s.FetchRoleAssignmentsForPrincipalsAsync(It.Is<List<string>>(ids => ids.Contains(spObjectId) && ids.Count == 1)))
+            .Callback<List<string>>(ids => capturedIdentityIds = ids)
+            .ReturnsAsync(new List<AzureRoleAssignmentDto>());
+        
+        _resourceGraphServiceMock
+            .Setup(s => s.FetchRoleAssignmentsForPrincipalsAsync(It.Is<List<string>>(ids => !ids.Contains(spObjectId))))
+            .Callback<List<string>>(ids => capturedGroupIds = ids)
             .ReturnsAsync(new List<AzureRoleAssignmentDto>());
 
         // Setup: API permissions service returns empty list
@@ -229,17 +237,18 @@ public class AzureRoleAssignmentServiceTests
         await service.GetRoleAssignmentsAsync(identity);
 
         // Assert
-        Assert.NotNull(capturedPrincipalIds);
+        Assert.NotNull(capturedIdentityIds);
+        Assert.NotNull(capturedGroupIds);
 
-        // Verify all expected identities are included
-        Assert.Contains(spObjectId, capturedPrincipalIds);     // SP ObjectId
-        Assert.Contains(groupAId, capturedPrincipalIds);       // Direct group A
-        Assert.Contains(groupBId, capturedPrincipalIds);       // Direct group B  
-        Assert.Contains(sharedParentId, capturedPrincipalIds); // Shared parent group
+        // Verify identity call
+        Assert.Single(capturedIdentityIds);
+        Assert.Equal(spObjectId, capturedIdentityIds[0]);
 
-        // Verify total count is correct (SP + group A + group B + shared parent = 4)
-        // Note: The current implementation may include duplicates, but this test verifies the expected behavior
-        Assert.Equal(4, capturedPrincipalIds.Count);
+        // Verify all expected groups are included (unique)
+        Assert.Contains(groupAId, capturedGroupIds);       // Direct group A
+        Assert.Contains(groupBId, capturedGroupIds);       // Direct group B  
+        Assert.Contains(sharedParentId, capturedGroupIds); // Shared parent group
+        Assert.Equal(3, capturedGroupIds.Count);
     }
 
     /// <summary>
@@ -257,33 +266,37 @@ public class AzureRoleAssignmentServiceTests
         var identity = CreateServicePrincipalIdentity(spObjectId, "Deeply Nested SP", "app-id-deep");
 
         // Setup: SP is a direct member of group level 1
-        var directGroupIds = new List<string> { groupLevel1Id };
+        var directGroupIds = new List<SecurityGroup> 
+        { 
+            new SecurityGroup { Id = groupLevel1Id, DisplayName = "Group Level 1" }
+        };
         _groupManagementServiceMock
             .Setup(s => s.GetGroupMembershipsAsync(It.Is<Identity>(i => i.ObjectId == spObjectId)))
             .ReturnsAsync(directGroupIds);
-
-        // Setup: group level 1 -> level 2 -> level 3 (3 levels deep)
-        var parentGroupIds = new List<string> { groupLevel2Id, groupLevel3Id };
-        var groupInfoMap = new Dictionary<string, GroupInfo>
-        {
-            { groupLevel1Id, new GroupInfo { Id = groupLevel1Id, DisplayName = "Level 1", Description = "First level", ParentGroupIds = new List<string> { groupLevel2Id } } },
-            { groupLevel2Id, new GroupInfo { Id = groupLevel2Id, DisplayName = "Level 2", Description = "Second level", ParentGroupIds = new List<string> { groupLevel3Id } } },
-            { groupLevel3Id, new GroupInfo { Id = groupLevel3Id, DisplayName = "Level 3", Description = "Third level", ParentGroupIds = new List<string>() } }
+        
+        // Setup: Transitive groups (levels 2 and 3)
+        var transitiveGroups = new List<SecurityGroup> 
+        { 
+            new SecurityGroup { Id = groupLevel2Id, DisplayName = "Group Level 2" },
+            new SecurityGroup { Id = groupLevel3Id, DisplayName = "Group Level 3" }
         };
         _groupManagementServiceMock
-            .Setup(s => s.GetParentGroupsAsync(directGroupIds))
-            .ReturnsAsync((parentGroupIds, groupInfoMap));
+            .Setup(s => s.GetTransitiveGroupsAsync(It.IsAny<List<SecurityGroup>>()))
+            .ReturnsAsync(transitiveGroups);
 
-        // Setup: Build security groups
-        _groupManagementServiceMock
-            .Setup(s => s.BuildSecurityGroupsWithPreFetchedData(It.IsAny<List<string>>(), It.IsAny<Dictionary<string, GroupInfo>>(), It.IsAny<List<AzureRoleAssignmentDto>>()))
-            .Returns(new List<SecurityGroup>());
+
 
         // Setup: Resource graph service to capture the principal IDs
-        List<string>? capturedPrincipalIds = null;
+        List<string>? capturedIdentityIds = null;
+        List<string>? capturedGroupIds = null;
         _resourceGraphServiceMock
-            .Setup(s => s.FetchRoleAssignmentsForPrincipalsAsync(It.IsAny<List<string>>()))
-            .Callback<List<string>>(ids => capturedPrincipalIds = ids)
+            .Setup(s => s.FetchRoleAssignmentsForPrincipalsAsync(It.Is<List<string>>(ids => ids.Contains(spObjectId) && ids.Count == 1)))
+            .Callback<List<string>>(ids => capturedIdentityIds = ids)
+            .ReturnsAsync(new List<AzureRoleAssignmentDto>());
+        
+        _resourceGraphServiceMock
+            .Setup(s => s.FetchRoleAssignmentsForPrincipalsAsync(It.Is<List<string>>(ids => !ids.Contains(spObjectId))))
+            .Callback<List<string>>(ids => capturedGroupIds = ids)
             .ReturnsAsync(new List<AzureRoleAssignmentDto>());
 
         // Setup: API permissions service returns empty list
@@ -297,15 +310,17 @@ public class AzureRoleAssignmentServiceTests
         await service.GetRoleAssignmentsAsync(identity);
 
         // Assert
-        Assert.NotNull(capturedPrincipalIds);
+        Assert.NotNull(capturedIdentityIds);
+        Assert.NotNull(capturedGroupIds);
 
-        // Verify all levels are included
-        Assert.Contains(spObjectId, capturedPrincipalIds);
-        Assert.Contains(groupLevel1Id, capturedPrincipalIds);
-        Assert.Contains(groupLevel2Id, capturedPrincipalIds);
-        Assert.Contains(groupLevel3Id, capturedPrincipalIds);
+        // Verify identity call
+        Assert.Single(capturedIdentityIds);
+        Assert.Equal(spObjectId, capturedIdentityIds[0]);
 
-        // Verify total count is correct (SP + 3 group levels = 4)
-        Assert.Equal(4, capturedPrincipalIds.Count);
+        // Verify all group levels are included
+        Assert.Contains(groupLevel1Id, capturedGroupIds);
+        Assert.Contains(groupLevel2Id, capturedGroupIds);
+        Assert.Contains(groupLevel3Id, capturedGroupIds);
+        Assert.Equal(3, capturedGroupIds.Count);
     }
 }

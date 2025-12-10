@@ -4,13 +4,17 @@ using Microsoft.Graph.Beta;
 using Microsoft.Graph.Beta.Models;
 using Matriarch.Web.Models;
 using Matriarch.Web.Configuration;
+using System.Collections.Concurrent;
+using System.Diagnostics;
 
 namespace Matriarch.Web.Services;
 
 public interface IGroupManagementService
 {
-    Task<List<string>> GetGroupMembershipsAsync(Models.Identity identity);
+    Task<List<SecurityGroup>> GetGroupMembershipsAsync(Models.Identity identity);
     Task<(List<string> parentGroupIds, Dictionary<string, GroupInfo> groupInfoMap)> GetParentGroupsAsync(List<string> directGroupIds);
+    Task<(List<string> parentGroupIds, Dictionary<string, GroupInfo> groupInfoMap, TimeSpan elapsedTime)> GetParentGroupsAsync(List<string> directGroupIds, bool useParallelProcessing);
+    Task<List<SecurityGroup>> GetTransitiveGroupsAsync(List<SecurityGroup> directGroupIds, bool useParallelProcessing = false);
     List<SecurityGroup> BuildSecurityGroupsWithPreFetchedData(List<string> directGroupIds, Dictionary<string, GroupInfo> groupInfoMap, List<AzureRoleAssignmentDto> roleAssignments);
 }
 
@@ -36,11 +40,14 @@ public class GroupManagementService : IGroupManagementService
 {
     private readonly ILogger<GroupManagementService> _logger;
     private readonly GraphServiceClient _graphClient;
+    private readonly AppSettings _settings;
+    private readonly SemaphoreSlim _transitiveGroupSemaphore;
     private const int MaxGraphPageSize = 999;
 
     public GroupManagementService(AppSettings settings, ILogger<GroupManagementService> logger)
     {
         _logger = logger;
+        _settings = settings;
 
         // Use ClientSecretCredential for authentication
         var credential = new ClientSecretCredential(
@@ -50,11 +57,16 @@ public class GroupManagementService : IGroupManagementService
 
         // Initialize Graph client for Entra ID operations
         _graphClient = new GraphServiceClient(credential);
+        
+        // Initialize semaphore for rate limiting transitive group requests
+        _transitiveGroupSemaphore = new SemaphoreSlim(
+            settings.Parallelization.MaxConcurrentTransitiveGroupRequests,
+            settings.Parallelization.MaxConcurrentTransitiveGroupRequests);
     }
 
-    public async Task<List<string>> GetGroupMembershipsAsync(Models.Identity identity)
+    public async Task<List<SecurityGroup>> GetGroupMembershipsAsync(Models.Identity identity)
     {
-        var groupIds = new List<string>();
+        var groupIds = new List<SecurityGroup>();
 
         try
         {
@@ -80,7 +92,7 @@ public class GroupManagementService : IGroupManagementService
                 {
                     if (directoryObject is Group group && group.SecurityEnabled == true && !string.IsNullOrEmpty(group.Id))
                     {
-                        groupIds.Add(group.Id);
+                        groupIds.Add(new SecurityGroup() { Id = group.Id, DisplayName = group?.DisplayName ?? ""});
                     }
                 }
             }
@@ -95,14 +107,14 @@ public class GroupManagementService : IGroupManagementService
         return groupIds;
     }
 
-    private async Task<DirectoryObjectCollectionResponse?> HandleGroupIdentityAsync(string groupId, List<string> groupIds)
+    private async Task<DirectoryObjectCollectionResponse?> HandleGroupIdentityAsync(string groupId, List<SecurityGroup> groups)
     {
         // For a group identity, verify it exists and is a security group
         var group = await _graphClient.Groups[groupId].GetAsync();
         if (group != null && group.SecurityEnabled == true)
         {
             // For a group, we treat it as being "member" of itself for role assignment purposes
-            groupIds.Add(groupId);
+            groups.Add(new SecurityGroup() { Id = group?.Id ?? "", DisplayName = group?.DisplayName ?? ""});
             _logger.LogInformation("Identity is a group, will fetch its role assignments");
         }
         // Return null as groups don't have memberOf in this context
@@ -111,65 +123,275 @@ public class GroupManagementService : IGroupManagementService
 
     public async Task<(List<string> parentGroupIds, Dictionary<string, GroupInfo> groupInfoMap)> GetParentGroupsAsync(List<string> directGroupIds)
     {
-        var allGroupIds = new HashSet<string>(directGroupIds);
-        var groupsToProcess = new Queue<string>(directGroupIds);
-        var processedGroups = new HashSet<string>();
-        var groupInfoMap = new Dictionary<string, GroupInfo>();
+        var result = await GetParentGroupsAsync(directGroupIds, false);
+        return (result.parentGroupIds, result.groupInfoMap);
+    }
 
-        while (groupsToProcess.Count > 0)
+    public async Task<List<SecurityGroup>> GetTransitiveGroupsAsync(List<SecurityGroup> directGroupIds, bool useParallelProcessing = false)
+    {
+        if (useParallelProcessing)
         {
-            var currentGroupId = groupsToProcess.Dequeue();
-            
-            // Skip if already processed (circular reference protection)
-            if (processedGroups.Contains(currentGroupId))
-            {
-                continue;
-            }
-            
-            processedGroups.Add(currentGroupId);
+            return await GetTransitiveGroupsParallelAsync(directGroupIds);
+        }
+        else
+        {
+            return await GetTransitiveGroupsSequentialAsync(directGroupIds);
+        }
+    }
 
+    private async Task<List<SecurityGroup>> GetTransitiveGroupsSequentialAsync(List<SecurityGroup> directGroupIds)
+    {
+        _logger.LogInformation("Fetching transitive groups for {Count} direct groups sequentially", directGroupIds.Count);
+        
+        var result = new List<SecurityGroup>();
+
+        foreach (var group in directGroupIds)
+        {
             try
             {
-                // Get group details and parent groups in a single operation
-                var group = await _graphClient.Groups[currentGroupId].GetAsync();
-                var memberOfPage = await _graphClient.Groups[currentGroupId].MemberOf.GetAsync(config =>
+                _logger.LogDebug("Fetching transitive members for group {GroupId}", group.Id);
+                
+                var transitiveMemberOfPage = await _graphClient.Groups[group.Id].TransitiveMemberOf.GetAsync(config =>
                 {
                     config.QueryParameters.Top = MaxGraphPageSize;
                 });
 
-                var parentGroupIds = new List<string>();
+                if (transitiveMemberOfPage?.Value != null)
+                {
+                    foreach (var directoryObject in transitiveMemberOfPage.Value)
+                    {
+                        if (directoryObject is Group parentGroup && 
+                            parentGroup.SecurityEnabled == true && 
+                            !string.IsNullOrEmpty(parentGroup.Id))
+                        {
+                            result.Add(new SecurityGroup() { Id = parentGroup.Id, DisplayName = parentGroup?.DisplayName ?? "" });
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error fetching transitive groups for {GroupId}", group.Id);
+            }
+        }
+
+        _logger.LogInformation("Completed fetching transitive groups sequentially: found {Count} total groups from {InputCount} direct groups", 
+            result.Count, directGroupIds.Count);
+        
+        return result;
+    }
+
+    private async Task<List<SecurityGroup>> GetTransitiveGroupsParallelAsync(List<SecurityGroup> directGroupIds)
+    {
+        _logger.LogInformation("Fetching transitive groups for {Count} direct groups with parallel processing and rate limiting", directGroupIds.Count);
+        
+        var result = new ConcurrentBag<SecurityGroup>();
+        var batchSize = _settings.Parallelization.TransitiveGroupBatchSize;
+        var delayBetweenBatches = _settings.Parallelization.DelayBetweenBatchesMilliseconds;
+
+        // Process groups in batches to manage throttling
+        var batches = directGroupIds
+            .Select((group, index) => new { group, index })
+            .GroupBy(x => x.index / batchSize)
+            .Select(g => g.Select(x => x.group).ToList())
+            .ToList();
+
+        _logger.LogInformation("Processing {BatchCount} batches of transitive groups (batch size: {BatchSize})", 
+            batches.Count, batchSize);
+
+        for (int batchIndex = 0; batchIndex < batches.Count; batchIndex++)
+        {
+            var batch = batches[batchIndex];
+            _logger.LogDebug("Processing batch {BatchIndex}/{TotalBatches} with {Count} groups", 
+                batchIndex + 1, batches.Count, batch.Count);
+
+            // Process batch in parallel with semaphore limiting
+            var batchTasks = batch.Select(async group =>
+            {
+                await _transitiveGroupSemaphore.WaitAsync();
+                try
+                {
+                    await FetchTransitiveGroupsForSingleGroupAsync(group, result);
+                }
+                finally
+                {
+                    _transitiveGroupSemaphore.Release();
+                }
+            });
+
+            await Task.WhenAll(batchTasks);
+
+            // Add delay between batches to avoid throttling (except after the last batch)
+            if (batchIndex < batches.Count - 1 && delayBetweenBatches > 0)
+            {
+                _logger.LogDebug("Waiting {Delay}ms before next batch", delayBetweenBatches);
+                await Task.Delay(delayBetweenBatches);
+            }
+        }
+
+        var resultList = result.ToList();
+        _logger.LogInformation("Completed fetching transitive groups in parallel: found {Count} total transitive groups from {InputCount} direct groups", 
+            resultList.Count, directGroupIds.Count);
+        
+        return resultList;
+    }
+
+    private async Task FetchTransitiveGroupsForSingleGroupAsync(SecurityGroup group, ConcurrentBag<SecurityGroup> result)
+    {
+        var groupId = group.Id;
+        try
+        {
+            _logger.LogDebug("Fetching transitive members for group {GroupId}", groupId);
+            
+            // Use TransitiveMemberOf to get all parent groups (direct and indirect)
+            var transitiveMemberOfPage = await _graphClient.Groups[groupId].TransitiveMemberOf.GetAsync(config =>
+            {
+                config.QueryParameters.Top = MaxGraphPageSize;
+            });
+
+            if (transitiveMemberOfPage?.Value != null)
+            {
+                foreach (var directoryObject in transitiveMemberOfPage.Value)
+                {
+                    if (directoryObject is Group parentGroup && 
+                        parentGroup.SecurityEnabled == true && 
+                        !string.IsNullOrEmpty(parentGroup.Id))
+                    {
+                        result.Add(new SecurityGroup() { Id = parentGroup.Id, DisplayName = parentGroup?.DisplayName ?? "", ChildGroup = group });
+                    }
+                }
+            }
+        }
+        catch (Azure.RequestFailedException azEx) when (azEx.Status == 429 || azEx.Status == 503)
+        {
+            _logger.LogWarning("Azure throttling detected (Status: {Status}) for group {GroupId}, skipping this group", 
+                azEx.Status, groupId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error fetching transitive groups for {GroupId}", groupId);
+        }
+    }
+
+    public async Task<(List<string> parentGroupIds, Dictionary<string, GroupInfo> groupInfoMap, TimeSpan elapsedTime)> GetParentGroupsAsync(List<string> directGroupIds, bool useParallelProcessing)
+    {
+        var stopwatch = Stopwatch.StartNew();
+
+        var (parentGroupIds, groupInfoMap) = await GetParentGroupsSequentialAsync(directGroupIds);
+        stopwatch.Stop();
+        _logger.LogInformation("GetParentGroupsAsync (Sequential) completed in {ElapsedMs}ms", stopwatch.ElapsedMilliseconds);
+        return (parentGroupIds, groupInfoMap, stopwatch.Elapsed);
+    }
+
+    private async Task<(List<string> parentGroupIds, Dictionary<string, GroupInfo> groupInfoMap)> GetParentGroupsSequentialAsync(List<string> directGroupIds)
+    {
+        var allGroupIds = new HashSet<string>(directGroupIds);
+        var groupInfoMap = new Dictionary<string, GroupInfo>();
+
+        // Process each direct group to get all transitive parent groups
+        foreach (var groupId in directGroupIds)
+        {
+            try
+            {
+                // Get group details
+                var group = await _graphClient.Groups[groupId].GetAsync();
+                
+                // Use TransitiveMemberOf to get all parent groups (direct and indirect) in one call
+                var transitiveMemberOfPage = await _graphClient.Groups[groupId].TransitiveMemberOf.GetAsync(config =>
+                {
+                    config.QueryParameters.Top = MaxGraphPageSize;
+                });
+
+                var directParentGroupIds = new List<string>();
+                
+                // First, get direct parent groups using MemberOf
+                var memberOfPage = await _graphClient.Groups[groupId].MemberOf.GetAsync(config =>
+                {
+                    config.QueryParameters.Top = MaxGraphPageSize;
+                });
+                
                 if (memberOfPage?.Value != null)
                 {
                     foreach (var directoryObject in memberOfPage.Value)
                     {
                         if (directoryObject is Group parentGroup && parentGroup.SecurityEnabled == true && !string.IsNullOrEmpty(parentGroup.Id))
                         {
-                            parentGroupIds.Add(parentGroup.Id);
-                            if (allGroupIds.Add(parentGroup.Id))
-                            {
-                                // New group found, add to queue for processing
-                                groupsToProcess.Enqueue(parentGroup.Id);
-                            }
+                            directParentGroupIds.Add(parentGroup.Id);
                         }
                     }
                 }
 
-                // Store group information
-                groupInfoMap[currentGroupId] = new GroupInfo
+                // Store group information with direct parents
+                groupInfoMap[groupId] = new GroupInfo
                 {
-                    Id = group?.Id ?? currentGroupId,
+                    Id = group?.Id ?? groupId,
                     DisplayName = group?.DisplayName ?? string.Empty,
                     Description = group?.Description ?? string.Empty,
-                    ParentGroupIds = parentGroupIds
+                    ParentGroupIds = directParentGroupIds
+                };
+
+                // Add all transitive parent groups to the set
+                if (transitiveMemberOfPage?.Value != null)
+                {
+                    foreach (var directoryObject in transitiveMemberOfPage.Value)
+                    {
+                        if (directoryObject is Group parentGroup && parentGroup.SecurityEnabled == true && !string.IsNullOrEmpty(parentGroup.Id))
+                        {
+                            allGroupIds.Add(parentGroup.Id);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error fetching parent groups for {GroupId}", groupId);
+            }
+        }
+
+        // Now fetch details for all discovered parent groups
+        var parentGroupIds = allGroupIds.Except(directGroupIds).ToList();
+        foreach (var parentGroupId in parentGroupIds)
+        {
+            if (groupInfoMap.ContainsKey(parentGroupId))
+            {
+                continue; // Already have info for this group
+            }
+
+            try
+            {
+                var group = await _graphClient.Groups[parentGroupId].GetAsync();
+                var memberOfPage = await _graphClient.Groups[parentGroupId].MemberOf.GetAsync(config =>
+                {
+                    config.QueryParameters.Top = MaxGraphPageSize;
+                });
+
+                var directParentGroupIds = new List<string>();
+                if (memberOfPage?.Value != null)
+                {
+                    foreach (var directoryObject in memberOfPage.Value)
+                    {
+                        if (directoryObject is Group parentGroup && parentGroup.SecurityEnabled == true && !string.IsNullOrEmpty(parentGroup.Id))
+                        {
+                            directParentGroupIds.Add(parentGroup.Id);
+                        }
+                    }
+                }
+
+                groupInfoMap[parentGroupId] = new GroupInfo
+                {
+                    Id = group?.Id ?? parentGroupId,
+                    DisplayName = group?.DisplayName ?? string.Empty,
+                    Description = group?.Description ?? string.Empty,
+                    ParentGroupIds = directParentGroupIds
                 };
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Error fetching parent groups for {GroupId}", currentGroupId);
+                _logger.LogWarning(ex, "Error fetching parent group details for {GroupId}", parentGroupId);
             }
         }
 
-        return (allGroupIds.Except(directGroupIds).ToList(), groupInfoMap);
+        return (parentGroupIds, groupInfoMap);
     }
 
     public List<SecurityGroup> BuildSecurityGroupsWithPreFetchedData(
