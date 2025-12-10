@@ -11,7 +11,7 @@ public interface IRoleAssignmentService
     // Separate methods for sequential loading
     Task<List<RoleAssignment>> GetDirectRoleAssignmentsAsync(Identity identity);
     Task<List<SecurityGroup>> GetDirectGroupsAsync(Identity identity);
-    Task<List<SecurityGroup>> GetIndirectGroupsAsync(List<SecurityGroup> directGroups);
+    Task<List<SecurityGroup>> GetIndirectGroupsAsync(List<SecurityGroup> directGroups, bool useParallelProcessing = false);
     Task<List<ApiPermission>> GetApiPermissionsAsync(Identity identity);
     Task PopulateGroupRoleAssignmentsAsync(List<SecurityGroup> directGroups, List<SecurityGroup> indirectGroups);
 }
@@ -149,7 +149,7 @@ public class MockRoleAssignmentService : IRoleAssignmentService
         return Task.FromResult(_mockSecurityGroups.Take(2).ToList());
     }
 
-    public Task<List<SecurityGroup>> GetIndirectGroupsAsync(List<SecurityGroup> directGroups)
+    public Task<List<SecurityGroup>> GetIndirectGroupsAsync(List<SecurityGroup> directGroups, bool useParallelProcessing = false)
     {
         // Return parent groups from the mock data
         return Task.FromResult(_mockSecurityGroups.Skip(2).ToList());

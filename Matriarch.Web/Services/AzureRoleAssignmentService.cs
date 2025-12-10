@@ -129,11 +129,12 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
         return await _groupManagementService.GetGroupMembershipsAsync(identity);
     }
 
-    public async Task<List<SecurityGroup>> GetIndirectGroupsAsync(List<SecurityGroup> directGroups)
+    public async Task<List<SecurityGroup>> GetIndirectGroupsAsync(List<SecurityGroup> directGroups, bool useParallelProcessing = false)
     {
-        _logger.LogInformation("Fetching indirect groups for {Count} direct groups", directGroups.Count);
+        _logger.LogInformation("Fetching indirect groups for {Count} direct groups (parallel: {UseParallel})", 
+            directGroups.Count, useParallelProcessing);
         
-        return await _groupManagementService.GetTransitiveGroupsAsync(directGroups);
+        return await _groupManagementService.GetTransitiveGroupsAsync(directGroups, useParallelProcessing);
     }
 
     public async Task<List<ApiPermission>> GetApiPermissionsAsync(Identity identity)

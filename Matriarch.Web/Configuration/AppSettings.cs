@@ -37,7 +37,6 @@ public class SqliteSettings
 
 public class ParallelizationSettings
 {
-    public bool EnableParallelProcessing { get; set; } = false;
     public int MaxDegreeOfParallelism { get; set; } = 4;
     public int MaxRetryAttempts { get; set; } = 3;
     public int RetryDelayMilliseconds { get; set; } = 1000;

@@ -14,7 +14,7 @@ public interface IGroupManagementService
     Task<List<SecurityGroup>> GetGroupMembershipsAsync(Models.Identity identity);
     Task<(List<string> parentGroupIds, Dictionary<string, GroupInfo> groupInfoMap)> GetParentGroupsAsync(List<string> directGroupIds);
     Task<(List<string> parentGroupIds, Dictionary<string, GroupInfo> groupInfoMap, TimeSpan elapsedTime)> GetParentGroupsAsync(List<string> directGroupIds, bool useParallelProcessing);
-    Task<List<SecurityGroup>> GetTransitiveGroupsAsync(List<SecurityGroup> directGroupIds);
+    Task<List<SecurityGroup>> GetTransitiveGroupsAsync(List<SecurityGroup> directGroupIds, bool useParallelProcessing = false);
     List<SecurityGroup> BuildSecurityGroupsWithPreFetchedData(List<string> directGroupIds, Dictionary<string, GroupInfo> groupInfoMap, List<AzureRoleAssignmentDto> roleAssignments);
 }
 
@@ -123,13 +123,67 @@ public class GroupManagementService : IGroupManagementService
 
     public async Task<(List<string> parentGroupIds, Dictionary<string, GroupInfo> groupInfoMap)> GetParentGroupsAsync(List<string> directGroupIds)
     {
-        var result = await GetParentGroupsAsync(directGroupIds, _settings.Parallelization.EnableParallelProcessing);
+        var result = await GetParentGroupsAsync(directGroupIds, false);
         return (result.parentGroupIds, result.groupInfoMap);
     }
 
-    public async Task<List<SecurityGroup>> GetTransitiveGroupsAsync(List<SecurityGroup> directGroupIds)
+    public async Task<List<SecurityGroup>> GetTransitiveGroupsAsync(List<SecurityGroup> directGroupIds, bool useParallelProcessing = false)
     {
-        _logger.LogInformation("Fetching transitive groups for {Count} direct groups with rate limiting", directGroupIds.Count);
+        if (useParallelProcessing)
+        {
+            return await GetTransitiveGroupsParallelAsync(directGroupIds);
+        }
+        else
+        {
+            return await GetTransitiveGroupsSequentialAsync(directGroupIds);
+        }
+    }
+
+    private async Task<List<SecurityGroup>> GetTransitiveGroupsSequentialAsync(List<SecurityGroup> directGroupIds)
+    {
+        _logger.LogInformation("Fetching transitive groups for {Count} direct groups sequentially", directGroupIds.Count);
+        
+        var result = new List<SecurityGroup>();
+
+        foreach (var group in directGroupIds)
+        {
+            try
+            {
+                _logger.LogDebug("Fetching transitive members for group {GroupId}", group.Id);
+                
+                var transitiveMemberOfPage = await _graphClient.Groups[group.Id].TransitiveMemberOf.GetAsync(config =>
+                {
+                    config.QueryParameters.Top = MaxGraphPageSize;
+                });
+
+                if (transitiveMemberOfPage?.Value != null)
+                {
+                    foreach (var directoryObject in transitiveMemberOfPage.Value)
+                    {
+                        if (directoryObject is Group parentGroup && 
+                            parentGroup.SecurityEnabled == true && 
+                            !string.IsNullOrEmpty(parentGroup.Id))
+                        {
+                            result.Add(new SecurityGroup() { Id = parentGroup.Id, DisplayName = parentGroup?.DisplayName ?? "" });
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error fetching transitive groups for {GroupId}", group.Id);
+            }
+        }
+
+        _logger.LogInformation("Completed fetching transitive groups sequentially: found {Count} total groups from {InputCount} direct groups", 
+            result.Count, directGroupIds.Count);
+        
+        return result;
+    }
+
+    private async Task<List<SecurityGroup>> GetTransitiveGroupsParallelAsync(List<SecurityGroup> directGroupIds)
+    {
+        _logger.LogInformation("Fetching transitive groups for {Count} direct groups with parallel processing and rate limiting", directGroupIds.Count);
         
         var result = new ConcurrentBag<SecurityGroup>();
         var batchSize = _settings.Parallelization.TransitiveGroupBatchSize;
@@ -176,7 +230,7 @@ public class GroupManagementService : IGroupManagementService
         }
 
         var resultList = result.ToList();
-        _logger.LogInformation("Completed fetching transitive groups: found {Count} total transitive groups from {InputCount} direct groups", 
+        _logger.LogInformation("Completed fetching transitive groups in parallel: found {Count} total transitive groups from {InputCount} direct groups", 
             resultList.Count, directGroupIds.Count);
         
         return resultList;
