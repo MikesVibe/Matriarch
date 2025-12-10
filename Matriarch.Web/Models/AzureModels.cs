@@ -62,3 +62,22 @@ public class SecurityGroupDto
     public string? Description { get; set; }
     public List<GroupMemberDto> Members { get; set; } = new();
 }
+
+public class KeyVaultDto
+{
+    public string Id { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string TenantId { get; set; } = string.Empty;
+    public List<AccessPolicyEntryDto> AccessPolicies { get; set; } = new();
+}
+
+public class AccessPolicyEntryDto
+{
+    public string TenantId { get; set; } = string.Empty;
+    public string ObjectId { get; set; } = string.Empty;
+    public string ApplicationId { get; set; } = string.Empty;
+    public List<string> KeyPermissions { get; set; } = new();
+    public List<string> SecretPermissions { get; set; } = new();
+    public List<string> CertificatePermissions { get; set; } = new();
+    public List<string> StoragePermissions { get; set; } = new();
+}

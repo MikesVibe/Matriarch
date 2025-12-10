@@ -14,6 +14,7 @@ public interface IRoleAssignmentService
     Task<List<SecurityGroup>> GetIndirectGroupsAsync(List<SecurityGroup> directGroups, bool useParallelProcessing = false);
     Task<List<ApiPermission>> GetApiPermissionsAsync(Identity identity);
     Task PopulateGroupRoleAssignmentsAsync(List<SecurityGroup> directGroups, List<SecurityGroup> indirectGroups);
+    Task<List<KeyVaultAccessPolicy>> GetKeyVaultAccessPoliciesAsync(Identity identity, List<SecurityGroup> directGroups, List<SecurityGroup> indirectGroups);
 }
 
 public class MockRoleAssignmentService : IRoleAssignmentService
@@ -164,5 +165,47 @@ public class MockRoleAssignmentService : IRoleAssignmentService
     {
         // Mock service already has role assignments populated
         return Task.CompletedTask;
+    }
+
+    public Task<List<KeyVaultAccessPolicy>> GetKeyVaultAccessPoliciesAsync(Identity identity, List<SecurityGroup> directGroups, List<SecurityGroup> indirectGroups)
+    {
+        // Return mock Key Vault access policies
+        var mockPolicies = new List<KeyVaultAccessPolicy>
+        {
+            new KeyVaultAccessPolicy
+            {
+                KeyVaultName = "kv-production-001",
+                KeyVaultId = "/subscriptions/sub-123/resourceGroups/rg-keyvault/providers/Microsoft.KeyVault/vaults/kv-production-001",
+                TenantId = "tenant-123",
+                ObjectId = identity.ObjectId,
+                ApplicationId = identity.ApplicationId ?? string.Empty,
+                KeyPermissions = new List<string> { "Get", "List", "Create", "Update" },
+                SecretPermissions = new List<string> { "Get", "List", "Set" },
+                CertificatePermissions = new List<string> { "Get", "List" },
+                StoragePermissions = new List<string>(),
+                AssignedTo = $"{identity.Name} (Direct)"
+            }
+        };
+
+        // Add a policy from a group if there are direct groups
+        if (directGroups.Any())
+        {
+            var firstGroup = directGroups.First();
+            mockPolicies.Add(new KeyVaultAccessPolicy
+            {
+                KeyVaultName = "kv-shared-resources",
+                KeyVaultId = "/subscriptions/sub-123/resourceGroups/rg-shared/providers/Microsoft.KeyVault/vaults/kv-shared-resources",
+                TenantId = "tenant-123",
+                ObjectId = firstGroup.Id,
+                ApplicationId = string.Empty,
+                KeyPermissions = new List<string> { "Get", "List" },
+                SecretPermissions = new List<string> { "Get", "List" },
+                CertificatePermissions = new List<string> { "Get" },
+                StoragePermissions = new List<string>(),
+                AssignedTo = firstGroup.DisplayName
+            });
+        }
+
+        return Task.FromResult(mockPolicies);
     }
 }

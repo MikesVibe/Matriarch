@@ -163,6 +163,63 @@ public class AzureRoleAssignmentService : IRoleAssignmentService
         }
     }
 
+    public async Task<List<KeyVaultAccessPolicy>> GetKeyVaultAccessPoliciesAsync(Identity identity, List<SecurityGroup> directGroups, List<SecurityGroup> indirectGroups)
+    {
+        _logger.LogInformation("Fetching Key Vault access policies for identity: {Name} ({ObjectId})", identity.Name, identity.ObjectId);
+
+        // Collect all principal IDs (identity + all groups)
+        var principalIds = new List<string> { identity.ObjectId };
+        principalIds.AddRange(directGroups.Select(g => g.Id));
+        principalIds.AddRange(indirectGroups.Select(g => g.Id));
+        principalIds = principalIds.Distinct().ToList();
+
+        // Fetch Key Vault access policies
+        var keyVaults = await _resourceGraphService.FetchKeyVaultAccessPoliciesForPrincipalsAsync(principalIds);
+
+        // Create a mapping of object IDs to display names for easy lookup
+        var identityLookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [identity.ObjectId] = $"{identity.Name} (Direct)"
+        };
+
+        foreach (var group in directGroups.Concat(indirectGroups))
+        {
+            if (!identityLookup.ContainsKey(group.Id))
+            {
+                identityLookup[group.Id] = group.DisplayName;
+            }
+        }
+
+        // Convert to KeyVaultAccessPolicy list
+        var accessPolicies = new List<KeyVaultAccessPolicy>();
+        foreach (var keyVault in keyVaults)
+        {
+            foreach (var policy in keyVault.AccessPolicies)
+            {
+                var assignedTo = identityLookup.TryGetValue(policy.ObjectId, out var name) 
+                    ? name 
+                    : $"Unknown ({policy.ObjectId})";
+
+                accessPolicies.Add(new KeyVaultAccessPolicy
+                {
+                    KeyVaultName = keyVault.Name,
+                    KeyVaultId = keyVault.Id,
+                    TenantId = policy.TenantId,
+                    ObjectId = policy.ObjectId,
+                    ApplicationId = policy.ApplicationId,
+                    KeyPermissions = policy.KeyPermissions,
+                    SecretPermissions = policy.SecretPermissions,
+                    CertificatePermissions = policy.CertificatePermissions,
+                    StoragePermissions = policy.StoragePermissions,
+                    AssignedTo = assignedTo
+                });
+            }
+        }
+
+        _logger.LogInformation("Found {Count} Key Vault access policies", accessPolicies.Count);
+        return accessPolicies;
+    }
+
     private void AddRoleAssignmentsToGroups(List<SecurityGroup> groups, List<AzureRoleAssignmentDto> roleAssignments)
     {
         foreach (var group in groups)
