@@ -46,6 +46,7 @@ public class SecurityGroup
     public string Id { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
+    public SecurityGroup? ChildGroup { get; set; } = null;
     public List<RoleAssignment> RoleAssignments { get; set; } = new();
     public List<SecurityGroup> ParentGroups { get; set; } = new();
 }

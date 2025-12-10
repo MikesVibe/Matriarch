@@ -211,7 +211,7 @@ public class GroupManagementService : IGroupManagementService
                 await _transitiveGroupSemaphore.WaitAsync();
                 try
                 {
-                    await FetchTransitiveGroupsForSingleGroupAsync(group.Id, result);
+                    await FetchTransitiveGroupsForSingleGroupAsync(group, result);
                 }
                 finally
                 {
@@ -236,8 +236,9 @@ public class GroupManagementService : IGroupManagementService
         return resultList;
     }
 
-    private async Task FetchTransitiveGroupsForSingleGroupAsync(string groupId, ConcurrentBag<SecurityGroup> result)
+    private async Task FetchTransitiveGroupsForSingleGroupAsync(SecurityGroup group, ConcurrentBag<SecurityGroup> result)
     {
+        var groupId = group.Id;
         try
         {
             _logger.LogDebug("Fetching transitive members for group {GroupId}", groupId);
@@ -256,7 +257,7 @@ public class GroupManagementService : IGroupManagementService
                         parentGroup.SecurityEnabled == true && 
                         !string.IsNullOrEmpty(parentGroup.Id))
                     {
-                        result.Add(new SecurityGroup() { Id = parentGroup.Id, DisplayName = parentGroup?.DisplayName ?? "" });
+                        result.Add(new SecurityGroup() { Id = parentGroup.Id, DisplayName = parentGroup?.DisplayName ?? "", ChildGroup = group });
                     }
                 }
             }
