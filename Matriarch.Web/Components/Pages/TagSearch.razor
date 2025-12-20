@@ -704,60 +704,8 @@
 
             StateHasChanged(); // Show the identities first
 
-            // Batch fetch role assignments for better performance (10 identities per batch)
-            const int batchSize = 10;
-            var identityBatches = identityResults
-                .Select((identity, index) => new { identity, index })
-                .GroupBy(x => x.index / batchSize)
-                .Select(g => g.Select(x => x.identity).ToList())
-                .ToList();
-
-            // Fetch role assignments in batches
-            var roleAssignmentTasks = identityBatches.Select(async batch =>
-            {
-                try
-                {
-                    var principalIds = batch.Select(ir => ir.Identity.PrincipalId).ToList();
-                    var roleAssignments = await _resourceGraphService.FetchRoleAssignmentsForPrincipalsAsync(principalIds);
-                    
-                    // Group role assignments by principal ID
-                    var roleAssignmentsByPrincipal = roleAssignments
-                        .GroupBy(ra => ra.PrincipalId)
-                        .ToDictionary(g => g.Key, g => g.ToList());
-                    
-                    // Assign role assignments to each identity in the batch
-                    foreach (var identityResult in batch)
-                    {
-                        if (roleAssignmentsByPrincipal.TryGetValue(identityResult.Identity.PrincipalId, out var assignments))
-                        {
-                            identityResult.DirectRoleAssignments = assignments
-                                .Select(ra => new AppRoleAssignment
-                                {
-                                    Id = ra.Id,
-                                    RoleName = ra.RoleName,
-                                    Scope = ra.Scope,
-                                    AssignedTo = "Direct Assignment"
-                                })
-                                .ToList();
-                        }
-                        identityResult.IsLoadingRoleAssignments = false;
-                    }
-                    StateHasChanged();
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogError(ex, "Error loading role assignments for batch");
-                    // Mark all identities in batch as failed
-                    foreach (var identityResult in batch)
-                    {
-                        identityResult.IsLoadingRoleAssignments = false;
-                    }
-                    StateHasChanged();
-                }
-            });
-
-            // Load all other data for each identity in parallel
-            var tasks = identityResults.Select(async identityResult =>
+            // Process each identity sequentially (one by one)
+            foreach (var identityResult in identityResults)
             {
                 // Create an Identity object from the ManagedIdentityResourceDto
                 var identity = new AppIdentity
@@ -773,84 +721,147 @@
                     SubscriptionId = identityResult.Identity.SubscriptionId
                 };
 
-                // Role assignments are loaded in batches above, so skip that here
+                // For each identity, fetch all data in parallel
+                var identityTasks = new List<Task>();
 
-                try
+                // Task 1: Load direct role assignments
+                identityTasks.Add(Task.Run(async () =>
                 {
-                    // Load direct groups
-                    identityResult.SecurityDirectGroups = await _roleAssignmentService.GetDirectGroupsAsync(identity);
-                    identityResult.IsLoadingDirectGroups = false;
-                    StateHasChanged();
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogError(ex, "Error loading direct groups for {PrincipalId}", identityResult.Identity.PrincipalId);
-                    identityResult.IsLoadingDirectGroups = false;
-                    StateHasChanged();
-                }
+                    try
+                    {
+                        var roleAssignments = await _resourceGraphService.FetchRoleAssignmentsForPrincipalsAsync(
+                            new List<string> { identityResult.Identity.PrincipalId });
 
-                try
-                {
-                    // Load indirect groups (transitive)
-                    identityResult.SecurityIndirectGroups = await _roleAssignmentService.GetIndirectGroupsAsync(
-                        identityResult.SecurityDirectGroups, useParallelProcessing: false);
-                    identityResult.IsLoadingIndirectGroups = false;
-                    StateHasChanged();
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogError(ex, "Error loading indirect groups for {PrincipalId}", identityResult.Identity.PrincipalId);
-                    identityResult.IsLoadingIndirectGroups = false;
-                    StateHasChanged();
-                }
+                        identityResult.DirectRoleAssignments = roleAssignments
+                            .Select(ra => new AppRoleAssignment
+                            {
+                                Id = ra.Id,
+                                RoleName = ra.RoleName,
+                                Scope = ra.Scope,
+                                AssignedTo = "Direct Assignment"
+                            })
+                            .ToList();
+                        identityResult.IsLoadingRoleAssignments = false;
+                        StateHasChanged();
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError(ex, "Error loading role assignments for {PrincipalId}", identityResult.Identity.PrincipalId);
+                        identityResult.IsLoadingRoleAssignments = false;
+                        StateHasChanged();
+                    }
+                }));
 
-                try
+                // Task 2: Load direct groups
+                identityTasks.Add(Task.Run(async () =>
                 {
-                    // Populate group role assignments
-                    await _roleAssignmentService.PopulateGroupRoleAssignmentsAsync(
-                        identityResult.SecurityDirectGroups, identityResult.SecurityIndirectGroups);
-                    identityResult.IsLoadingGroupRoleAssignments = false;
-                    StateHasChanged();
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogError(ex, "Error loading group role assignments for {PrincipalId}", identityResult.Identity.PrincipalId);
-                    identityResult.IsLoadingGroupRoleAssignments = false;
-                    StateHasChanged();
-                }
+                    try
+                    {
+                        identityResult.SecurityDirectGroups = await _roleAssignmentService.GetDirectGroupsAsync(identity);
+                        identityResult.IsLoadingDirectGroups = false;
+                        StateHasChanged();
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError(ex, "Error loading direct groups for {PrincipalId}", identityResult.Identity.PrincipalId);
+                        identityResult.IsLoadingDirectGroups = false;
+                        StateHasChanged();
+                    }
+                }));
 
-                try
+                // Task 3: Load indirect groups (must wait for direct groups to load first)
+                identityTasks.Add(Task.Run(async () =>
                 {
-                    // Load API permissions
-                    identityResult.ApiPermissions = await _roleAssignmentService.GetApiPermissionsAsync(identity);
-                    identityResult.IsLoadingApiPermissions = false;
-                    StateHasChanged();
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogError(ex, "Error loading API permissions for {PrincipalId}", identityResult.Identity.PrincipalId);
-                    identityResult.IsLoadingApiPermissions = false;
-                    StateHasChanged();
-                }
+                    try
+                    {
+                        // Wait for direct groups to be loaded first
+                        while (identityResult.IsLoadingDirectGroups)
+                        {
+                            await Task.Delay(100);
+                        }
+                        
+                        identityResult.SecurityIndirectGroups = await _roleAssignmentService.GetIndirectGroupsAsync(
+                            identityResult.SecurityDirectGroups, useParallelProcessing: false);
+                        identityResult.IsLoadingIndirectGroups = false;
+                        StateHasChanged();
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError(ex, "Error loading indirect groups for {PrincipalId}", identityResult.Identity.PrincipalId);
+                        identityResult.IsLoadingIndirectGroups = false;
+                        StateHasChanged();
+                    }
+                }));
 
-                try
+                // Task 4: Load group role assignments (depends on groups being loaded first)
+                identityTasks.Add(Task.Run(async () =>
                 {
-                    // Load Key Vault access policies
-                    identityResult.KeyVaultAccessPolicies = await _roleAssignmentService.GetKeyVaultAccessPoliciesAsync(
-                        identity, identityResult.SecurityDirectGroups, identityResult.SecurityIndirectGroups);
-                    identityResult.IsLoadingKeyVaultPolicies = false;
-                    StateHasChanged();
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogError(ex, "Error loading Key Vault policies for {PrincipalId}", identityResult.Identity.PrincipalId);
-                    identityResult.IsLoadingKeyVaultPolicies = false;
-                    StateHasChanged();
-                }
-            });
+                    try
+                    {
+                        // Wait for groups to be loaded first
+                        while (identityResult.IsLoadingDirectGroups || identityResult.IsLoadingIndirectGroups)
+                        {
+                            await Task.Delay(100);
+                        }
+                        
+                        await _roleAssignmentService.PopulateGroupRoleAssignmentsAsync(
+                            identityResult.SecurityDirectGroups, identityResult.SecurityIndirectGroups);
+                        identityResult.IsLoadingGroupRoleAssignments = false;
+                        StateHasChanged();
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError(ex, "Error loading group role assignments for {PrincipalId}", identityResult.Identity.PrincipalId);
+                        identityResult.IsLoadingGroupRoleAssignments = false;
+                        StateHasChanged();
+                    }
+                }));
 
-            // Wait for all tasks (both role assignment batches and other data)
-            await Task.WhenAll(roleAssignmentTasks.Concat(tasks));
+                // Task 5: Load API permissions
+                identityTasks.Add(Task.Run(async () =>
+                {
+                    try
+                    {
+                        identityResult.ApiPermissions = await _roleAssignmentService.GetApiPermissionsAsync(identity);
+                        identityResult.IsLoadingApiPermissions = false;
+                        StateHasChanged();
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError(ex, "Error loading API permissions for {PrincipalId}", identityResult.Identity.PrincipalId);
+                        identityResult.IsLoadingApiPermissions = false;
+                        StateHasChanged();
+                    }
+                }));
+
+                // Task 6: Load Key Vault access policies (depends on groups being loaded first)
+                identityTasks.Add(Task.Run(async () =>
+                {
+                    try
+                    {
+                        // Wait for groups to be loaded first
+                        while (identityResult.IsLoadingDirectGroups || identityResult.IsLoadingIndirectGroups)
+                        {
+                            await Task.Delay(100);
+                        }
+                        
+                        identityResult.KeyVaultAccessPolicies = await _roleAssignmentService.GetKeyVaultAccessPoliciesAsync(
+                            identity, identityResult.SecurityDirectGroups, identityResult.SecurityIndirectGroups);
+                        identityResult.IsLoadingKeyVaultPolicies = false;
+                        StateHasChanged();
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError(ex, "Error loading Key Vault policies for {PrincipalId}", identityResult.Identity.PrincipalId);
+                        identityResult.IsLoadingKeyVaultPolicies = false;
+                        StateHasChanged();
+                    }
+                }));
+
+                // Wait for all tasks for this identity to complete before moving to next identity
+                await Task.WhenAll(identityTasks);
+            }
+
             allDataLoaded = true;
     }
 
