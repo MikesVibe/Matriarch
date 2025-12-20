@@ -742,13 +742,13 @@
                             })
                             .ToList();
                         identityResult.IsLoadingRoleAssignments = false;
-                        StateHasChanged();
+                        await InvokeAsync(StateHasChanged);
                     }
                     catch (Exception ex)
                     {
                         Logger.LogError(ex, "Error loading role assignments for {PrincipalId}", identityResult.Identity.PrincipalId);
                         identityResult.IsLoadingRoleAssignments = false;
-                        StateHasChanged();
+                        await InvokeAsync(StateHasChanged);
                     }
                 }));
 
@@ -759,13 +759,13 @@
                     {
                         identityResult.SecurityDirectGroups = await _roleAssignmentService.GetDirectGroupsAsync(identity);
                         identityResult.IsLoadingDirectGroups = false;
-                        StateHasChanged();
+                        await InvokeAsync(StateHasChanged);
                     }
                     catch (Exception ex)
                     {
                         Logger.LogError(ex, "Error loading direct groups for {PrincipalId}", identityResult.Identity.PrincipalId);
                         identityResult.IsLoadingDirectGroups = false;
-                        StateHasChanged();
+                        await InvokeAsync(StateHasChanged);
                     }
                 }));
 
@@ -783,13 +783,13 @@
                         identityResult.SecurityIndirectGroups = await _roleAssignmentService.GetIndirectGroupsAsync(
                             identityResult.SecurityDirectGroups, useParallelProcessing: false);
                         identityResult.IsLoadingIndirectGroups = false;
-                        StateHasChanged();
+                        await InvokeAsync(StateHasChanged);
                     }
                     catch (Exception ex)
                     {
                         Logger.LogError(ex, "Error loading indirect groups for {PrincipalId}", identityResult.Identity.PrincipalId);
                         identityResult.IsLoadingIndirectGroups = false;
-                        StateHasChanged();
+                        await InvokeAsync(StateHasChanged);
                     }
                 }));
 
@@ -807,13 +807,13 @@
                         await _roleAssignmentService.PopulateGroupRoleAssignmentsAsync(
                             identityResult.SecurityDirectGroups, identityResult.SecurityIndirectGroups);
                         identityResult.IsLoadingGroupRoleAssignments = false;
-                        StateHasChanged();
+                        await InvokeAsync(StateHasChanged);
                     }
                     catch (Exception ex)
                     {
                         Logger.LogError(ex, "Error loading group role assignments for {PrincipalId}", identityResult.Identity.PrincipalId);
                         identityResult.IsLoadingGroupRoleAssignments = false;
-                        StateHasChanged();
+                        await InvokeAsync(StateHasChanged);
                     }
                 }));
 
@@ -824,13 +824,13 @@
                     {
                         identityResult.ApiPermissions = await _roleAssignmentService.GetApiPermissionsAsync(identity);
                         identityResult.IsLoadingApiPermissions = false;
-                        StateHasChanged();
+                        await InvokeAsync(StateHasChanged);
                     }
                     catch (Exception ex)
                     {
                         Logger.LogError(ex, "Error loading API permissions for {PrincipalId}", identityResult.Identity.PrincipalId);
                         identityResult.IsLoadingApiPermissions = false;
-                        StateHasChanged();
+                        await InvokeAsync(StateHasChanged);
                     }
                 }));
 
@@ -848,13 +848,13 @@
                         identityResult.KeyVaultAccessPolicies = await _roleAssignmentService.GetKeyVaultAccessPoliciesAsync(
                             identity, identityResult.SecurityDirectGroups, identityResult.SecurityIndirectGroups);
                         identityResult.IsLoadingKeyVaultPolicies = false;
-                        StateHasChanged();
+                        await InvokeAsync(StateHasChanged);
                     }
                     catch (Exception ex)
                     {
                         Logger.LogError(ex, "Error loading Key Vault policies for {PrincipalId}", identityResult.Identity.PrincipalId);
                         identityResult.IsLoadingKeyVaultPolicies = false;
-                        StateHasChanged();
+                        await InvokeAsync(StateHasChanged);
                     }
                 }));
 
