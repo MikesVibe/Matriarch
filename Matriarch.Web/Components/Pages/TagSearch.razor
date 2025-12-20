@@ -85,10 +85,44 @@
         <div class="col-md-12">
             <div class="alert alert-success" role="alert">
                 <i class="bi bi-check-circle me-2"></i>
-                Found <strong>@identityResults.Count</strong> identities matching the tag.
+                Found <strong>@totalIdentities</strong> identities matching the tag. Showing <strong>@((currentPage - 1) * pageSize + 1)</strong> to <strong>@Math.Min(currentPage * pageSize, totalIdentities)</strong>.
             </div>
         </div>
     </div>
+
+    @if (totalPages > 1)
+    {
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <nav aria-label="Page navigation">
+                    <ul class="pagination justify-content-center">
+                        <li class="page-item @(currentPage == 1 ? "disabled" : "")">
+                            <button class="page-link" @onclick="GoToPreviousPage" disabled="@(currentPage == 1)">
+                                <i class="bi bi-chevron-left"></i> Previous
+                            </button>
+                        </li>
+                        
+                        @for (int i = Math.Max(1, currentPage - 2); i <= Math.Min(totalPages, currentPage + 2); i++)
+                        {
+                            var pageNum = i; // Capture for lambda
+                            <li class="page-item @(currentPage == pageNum ? "active" : "")">
+                                <button class="page-link" @onclick="@(() => GoToPage(pageNum))">@pageNum</button>
+                            </li>
+                        }
+                        
+                        <li class="page-item @(currentPage == totalPages ? "disabled" : "")">
+                            <button class="page-link" @onclick="GoToNextPage" disabled="@(currentPage == totalPages)">
+                                Next <i class="bi bi-chevron-right"></i>
+                            </button>
+                        </li>
+                    </ul>
+                </nav>
+                <div class="text-center text-muted">
+                    Page @currentPage of @totalPages
+                </div>
+            </div>
+        </div>
+    }
 
     @if (allDataLoaded)
     {
@@ -429,6 +463,37 @@
             </div>
         </div>
     }
+
+    @if (totalPages > 1)
+    {
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <nav aria-label="Page navigation">
+                    <ul class="pagination justify-content-center">
+                        <li class="page-item @(currentPage == 1 ? "disabled" : "")">
+                            <button class="page-link" @onclick="GoToPreviousPage" disabled="@(currentPage == 1)">
+                                <i class="bi bi-chevron-left"></i> Previous
+                            </button>
+                        </li>
+                        
+                        @for (int i = Math.Max(1, currentPage - 2); i <= Math.Min(totalPages, currentPage + 2); i++)
+                        {
+                            var pageNum = i; // Capture for lambda
+                            <li class="page-item @(currentPage == pageNum ? "active" : "")">
+                                <button class="page-link" @onclick="@(() => GoToPage(pageNum))">@pageNum</button>
+                            </li>
+                        }
+                        
+                        <li class="page-item @(currentPage == totalPages ? "disabled" : "")">
+                            <button class="page-link" @onclick="GoToNextPage" disabled="@(currentPage == totalPages)">
+                                Next <i class="bi bi-chevron-right"></i>
+                            </button>
+                        </li>
+                    </ul>
+                </nav>
+            </div>
+        </div>
+    }
 }
 
 @code {
@@ -437,8 +502,15 @@
     private bool isLoading = false;
     private string? errorMessage;
     private List<IdentityResultWithRoles> identityResults = new();
+    private List<ManagedIdentityResourceDto> allManagedIdentities = new();
     private HashSet<string> collapsedIdentities = new();
     private bool allDataLoaded = false;
+    
+    // Paging variables
+    private int currentPage = 1;
+    private const int pageSize = 50;
+    private int totalIdentities = 0;
+    private int totalPages => (int)Math.Ceiling((double)totalIdentities / pageSize);
 
     private class IdentityResultWithRoles
     {
@@ -471,20 +543,49 @@
         identityResults.Clear();
         collapsedIdentities.Clear();
         allDataLoaded = false;
+        currentPage = 1;
 
         try
         {
-            // Fetch managed identities by tag
-            var managedIdentities = await _resourceGraphService.FetchManagedIdentitiesByTagAsync(tagValue);
+            // Fetch all managed identities by tag
+            allManagedIdentities = await _resourceGraphService.FetchManagedIdentitiesByTagAsync(tagValue);
 
-            if (!managedIdentities.Any())
+            if (!allManagedIdentities.Any())
             {
                 errorMessage = $"No identities found with tag value '{tagValue}'.";
+                totalIdentities = 0;
                 return;
             }
 
-            // Initialize results with identities
-            identityResults = managedIdentities.Select(mi => new IdentityResultWithRoles
+            totalIdentities = allManagedIdentities.Count;
+            
+            // Load first page
+            await LoadPage(1);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"An error occurred while searching: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadPage(int pageNumber)
+    {
+        currentPage = pageNumber;
+        identityResults.Clear();
+        collapsedIdentities.Clear();
+        allDataLoaded = false;
+        
+        // Calculate which identities to show on this page
+        var skip = (pageNumber - 1) * pageSize;
+        var pagedIdentities = allManagedIdentities.Skip(skip).Take(pageSize).ToList();
+
+        // Initialize results with identities for current page only
+        identityResults = pagedIdentities.Select(mi => new IdentityResultWithRoles
             {
                 Identity = mi,
                 DirectRoleAssignments = new List<RoleAssignment>(),
@@ -618,16 +719,6 @@
 
             await Task.WhenAll(tasks);
             allDataLoaded = true;
-        }
-        catch (Exception ex)
-        {
-            errorMessage = $"An error occurred while searching: {ex.Message}";
-        }
-        finally
-        {
-            isLoading = false;
-            StateHasChanged();
-        }
     }
 
     private void ToggleCollapse(string principalId)
@@ -639,6 +730,30 @@
         else
         {
             collapsedIdentities.Add(principalId);
+        }
+    }
+
+    private async Task GoToNextPage()
+    {
+        if (currentPage < totalPages)
+        {
+            await LoadPage(currentPage + 1);
+        }
+    }
+
+    private async Task GoToPreviousPage()
+    {
+        if (currentPage > 1)
+        {
+            await LoadPage(currentPage - 1);
+        }
+    }
+
+    private async Task GoToPage(int pageNumber)
+    {
+        if (pageNumber >= 1 && pageNumber <= totalPages)
+        {
+            await LoadPage(pageNumber);
         }
     }
 
