@@ -20,4 +20,11 @@ public interface IResourceGraphService
     /// <param name="principalIds">List of principal IDs (user, service principal, or group object IDs)</param>
     /// <returns>List of Key Vaults with their access policies filtered for the specified principals</returns>
     Task<List<KeyVaultDto>> FetchKeyVaultAccessPoliciesForPrincipalsAsync(List<string> principalIds);
+
+    /// <summary>
+    /// Fetches managed identities for resources with a specific tag from Azure Resource Graph.
+    /// </summary>
+    /// <param name="tagValue">The tag value to search for (e.g., 'ptci-1567')</param>
+    /// <returns>List of managed identity resources with the specified tag</returns>
+    Task<List<ManagedIdentityResourceDto>> FetchManagedIdentitiesByTagAsync(string tagValue);
 }

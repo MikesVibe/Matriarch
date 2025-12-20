@@ -328,4 +328,167 @@ public class AzureResourceGraphService : IResourceGraphService
 
         return permissions;
     }
+
+    public async Task<List<ManagedIdentityResourceDto>> FetchManagedIdentitiesByTagAsync(string tagValue)
+    {
+        if (string.IsNullOrWhiteSpace(tagValue))
+        {
+            _logger.LogWarning("Tag value is empty");
+            return new List<ManagedIdentityResourceDto>();
+        }
+
+        _logger.LogInformation("Fetching managed identities for tag value: {TagValue}", tagValue);
+
+        var managedIdentities = new List<ManagedIdentityResourceDto>();
+        var token = await GetAuthorizationTokenAsync();
+
+        // Sanitize tag value to prevent injection - allow only alphanumeric, hyphens, underscores
+        var sanitizedTag = new string(tagValue.Where(c => char.IsLetterOrDigit(c) || c == '-' || c == '_').ToArray());
+        if (string.IsNullOrEmpty(sanitizedTag))
+        {
+            _logger.LogWarning("Tag value contains no valid characters");
+            return new List<ManagedIdentityResourceDto>();
+        }
+
+        // Query from problem statement - updated to use parameterized tag value
+        var query = $@"
+(
+    ResourceContainers
+    | where type =~ 'microsoft.resources/subscriptions/resourcegroups'
+    | where tolower(tostring(tags['backstage-owner-ref'])) == '{sanitizedTag.ToLower()}'
+    | project subscriptionId, resourceGroup = name
+    | join kind=inner (
+        Resources
+        | where isnotempty(identity)
+        | where identity.type has 'SystemAssigned'
+        | project subscriptionId,
+                  resourceGroup,
+                  resourceId = id,
+                  resourceName = name,
+                  resourceType = type,
+                  principalId = tostring(identity.principalId),
+                  tenantId = tostring(identity.tenantId)
+    ) on subscriptionId, resourceGroup
+    | project subscriptionId,
+              resourceGroup,
+              resourceId,
+              resourceName,
+              resourceType,
+              identityType = 'SystemAssigned',
+              principalId,
+              tenantId,
+              managedIdentityResourceId = ''
+)
+| union (
+    ResourceContainers
+    | where type =~ 'microsoft.resources/subscriptions/resourcegroups'
+    | where tolower(tostring(tags['backstage-owner-ref'])) == '{sanitizedTag.ToLower()}'
+    | project subscriptionId, resourceGroup = name
+    | join kind=inner (
+        Resources
+        | where isnotempty(identity)
+        | where identity.type has 'UserAssigned'
+        | mv-expand userAssignedIdentityId = bag_keys(identity.userAssignedIdentities)
+        | extend userAssignedIdentityId = tostring(userAssignedIdentityId)
+        | extend userAssignedIdentity = identity.userAssignedIdentities[userAssignedIdentityId]
+        | project subscriptionId,
+                  resourceGroup,
+                  resourceId = id,
+                  resourceName = name,
+                  resourceType = type,
+                  userAssignedIdentityId,
+                  principalId = tostring(userAssignedIdentity.principalId),
+                  tenantId = tostring(userAssignedIdentity.tenantId)
+    ) on subscriptionId, resourceGroup
+    | project subscriptionId,
+              resourceGroup,
+              resourceId,
+              resourceName,
+              resourceType,
+              identityType = 'UserAssigned',
+              principalId,
+              tenantId,
+              managedIdentityResourceId = userAssignedIdentityId
+)
+| order by subscriptionId, resourceGroup, resourceName";
+
+        string? skipToken = null;
+
+        do
+        {
+            var responseDocument = await FetchManagedIdentitiesPageAsync(token, query, skipToken);
+            var pageOfIdentities = ParseManagedIdentitiesResponse(responseDocument);
+            managedIdentities.AddRange(pageOfIdentities);
+
+            skipToken = GetContinuationToken(responseDocument);
+        } while (!string.IsNullOrEmpty(skipToken));
+
+        _logger.LogInformation("Fetched {Count} managed identities for tag value {TagValue}", managedIdentities.Count, tagValue);
+        return managedIdentities;
+    }
+
+    private async Task<JsonDocument> FetchManagedIdentitiesPageAsync(AccessToken token, string customQuery, string? skipToken)
+    {
+        var requestBody = new Dictionary<string, object>
+        {
+            ["query"] = customQuery,
+            ["options"] = new Dictionary<string, object>
+            {
+                ["resultFormat"] = "objectArray",
+                ["$top"] = 1000
+            }
+        };
+
+        if (!string.IsNullOrEmpty(skipToken))
+        {
+            ((Dictionary<string, object>)requestBody["options"])["$skipToken"] = skipToken;
+        }
+
+        var jsonContent = JsonSerializer.Serialize(requestBody);
+        var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+        var request = new HttpRequestMessage(HttpMethod.Post, ResourceGraphApiEndpoint);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
+        request.Content = content;
+
+        var response = await _httpClient.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+
+        var responseContent = await response.Content.ReadAsStringAsync();
+        return JsonDocument.Parse(responseContent);
+    }
+
+    private static List<ManagedIdentityResourceDto> ParseManagedIdentitiesResponse(JsonDocument responseDocument)
+    {
+        var identities = new List<ManagedIdentityResourceDto>();
+
+        if (!responseDocument.RootElement.TryGetProperty("data", out var dataElement) ||
+            dataElement.ValueKind != JsonValueKind.Array)
+        {
+            return identities;
+        }
+
+        foreach (var row in dataElement.EnumerateArray())
+        {
+            if (row.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            identities.Add(new ManagedIdentityResourceDto
+            {
+                SubscriptionId = row.TryGetProperty("subscriptionId", out var subProp) ? subProp.GetString() ?? string.Empty : string.Empty,
+                ResourceGroup = row.TryGetProperty("resourceGroup", out var rgProp) ? rgProp.GetString() ?? string.Empty : string.Empty,
+                ResourceId = row.TryGetProperty("resourceId", out var ridProp) ? ridProp.GetString() ?? string.Empty : string.Empty,
+                ResourceName = row.TryGetProperty("resourceName", out var rnProp) ? rnProp.GetString() ?? string.Empty : string.Empty,
+                ResourceType = row.TryGetProperty("resourceType", out var rtProp) ? rtProp.GetString() ?? string.Empty : string.Empty,
+                IdentityType = row.TryGetProperty("identityType", out var itProp) ? itProp.GetString() ?? string.Empty : string.Empty,
+                PrincipalId = row.TryGetProperty("principalId", out var pidProp) ? pidProp.GetString() ?? string.Empty : string.Empty,
+                TenantId = row.TryGetProperty("tenantId", out var tidProp) ? tidProp.GetString() ?? string.Empty : string.Empty,
+                ManagedIdentityResourceId = row.TryGetProperty("managedIdentityResourceId", out var miridProp) ? miridProp.GetString() ?? string.Empty : string.Empty
+            });
+        }
+
+        return identities;
+    }
 }

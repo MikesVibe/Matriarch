@@ -75,4 +75,40 @@ public class MockResourceGraphService : IResourceGraphService
 
         return Task.FromResult(mockKeyVaults);
     }
+
+    public Task<List<ManagedIdentityResourceDto>> FetchManagedIdentitiesByTagAsync(string tagValue)
+    {
+        _logger.LogInformation("Mock: Fetching managed identities for tag: {TagValue}", tagValue);
+
+        // Return mock managed identities
+        var mockIdentities = new List<ManagedIdentityResourceDto>
+        {
+            new ManagedIdentityResourceDto
+            {
+                SubscriptionId = "sub-123",
+                ResourceGroup = "rg-dev",
+                ResourceId = "/subscriptions/sub-123/resourceGroups/rg-dev/providers/Microsoft.Web/sites/webapp-001",
+                ResourceName = "webapp-001",
+                ResourceType = "Microsoft.Web/sites",
+                IdentityType = "SystemAssigned",
+                PrincipalId = "principal-001",
+                TenantId = "tenant-123",
+                ManagedIdentityResourceId = string.Empty
+            },
+            new ManagedIdentityResourceDto
+            {
+                SubscriptionId = "sub-123",
+                ResourceGroup = "rg-dev",
+                ResourceId = "/subscriptions/sub-123/resourceGroups/rg-dev/providers/Microsoft.Compute/virtualMachines/vm-001",
+                ResourceName = "vm-001",
+                ResourceType = "Microsoft.Compute/virtualMachines",
+                IdentityType = "UserAssigned",
+                PrincipalId = "principal-002",
+                TenantId = "tenant-123",
+                ManagedIdentityResourceId = "/subscriptions/sub-123/resourceGroups/rg-identities/providers/Microsoft.ManagedIdentity/userAssignedIdentities/mi-001"
+            }
+        };
+
+        return Task.FromResult(mockIdentities);
+    }
 }
