@@ -95,6 +95,7 @@ public class ManagedIdentityResourceDto
     public string ManagedIdentityResourceId { get; set; } = string.Empty;
 }
 
-// Alias for backward compatibility
+// Alias to unify with duplicate definition in GroupManagementService.cs
+// Both definitions are identical and refer to role assignment data from Azure Resource Graph
 public class AzureRoleAssignmentDto : RoleAssignmentDto { }
 
