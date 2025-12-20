@@ -113,14 +113,15 @@
                                 <i class="bi @(collapsedIdentities.Contains(identityResult.Identity.PrincipalId) ? "bi-chevron-right" : "bi-chevron-down") me-2"></i>
                                 @identityResult.Identity.ResourceName (@identityResult.Identity.IdentityType)
                             </h5>
-                            <span class="badge bg-light text-dark">@identityResult.DirectRoleAssignments.Count role assignments</span>
+                            <span class="badge bg-light text-dark">@identityResult.DirectRoleAssignments.Count direct role assignments</span>
                         </div>
                     </div>
                     
                     @if (!collapsedIdentities.Contains(identityResult.Identity.PrincipalId))
                     {
                         <div class="card-body">
-                            <dl class="row mb-3">
+                            <h6>Identity Summary</h6>
+                            <dl class="row mb-4">
                                 <dt class="col-sm-3">Principal ID:</dt>
                                 <dd class="col-sm-9"><code>@identityResult.Identity.PrincipalId</code></dd>
 
@@ -140,24 +141,25 @@
                                 }
                             </dl>
 
-                            <h6 class="mt-4">Role Assignments</h6>
+                            <h6 class="mt-4">Direct Role Assignments</h6>
                             @if (identityResult.IsLoadingRoleAssignments)
                             {
-                                <div class="text-center py-4">
-                                    <div class="spinner-border text-primary" role="status">
+                                <div class="text-center py-3">
+                                    <div class="spinner-border spinner-border-sm text-primary" role="status">
                                         <span class="visually-hidden">Loading...</span>
                                     </div>
-                                    <p class="text-muted mt-2">Loading role assignments...</p>
+                                    <span class="text-muted ms-2">Loading...</span>
                                 </div>
                             }
                             else if (identityResult.DirectRoleAssignments.Any())
                             {
                                 <div class="table-responsive">
-                                    <table class="table table-striped table-hover">
+                                    <table class="table table-sm table-striped table-hover">
                                         <thead>
                                             <tr>
                                                 <th>Role Name</th>
                                                 <th>Scope</th>
+                                                <th>Assigned To</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -166,6 +168,7 @@
                                                 <tr>
                                                     <td><strong>@ra.RoleName</strong></td>
                                                     <td><code class="text-muted">@ra.Scope</code></td>
+                                                    <td><span class="badge bg-primary">@ra.AssignedTo</span></td>
                                                 </tr>
                                             }
                                         </tbody>
@@ -174,7 +177,251 @@
                             }
                             else
                             {
-                                <p class="text-muted">No role assignments found.</p>
+                                <p class="text-muted">No direct role assignments found.</p>
+                            }
+
+                            <h6 class="mt-4">Direct Group Memberships</h6>
+                            @if (identityResult.IsLoadingDirectGroups)
+                            {
+                                <div class="text-center py-3">
+                                    <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                    <span class="text-muted ms-2">Loading...</span>
+                                </div>
+                            }
+                            else if (identityResult.SecurityDirectGroups.Any())
+                            {
+                                <ul class="list-group">
+                                    @foreach (var group in identityResult.SecurityDirectGroups)
+                                    {
+                                        <li class="list-group-item">
+                                            <strong>@group.DisplayName</strong>
+                                            @if (!string.IsNullOrEmpty(group.Description))
+                                            {
+                                                <br />
+                                                <small class="text-muted">@group.Description</small>
+                                            }
+                                        </li>
+                                    }
+                                </ul>
+                            }
+                            else
+                            {
+                                <p class="text-muted">Not a direct member of any security groups.</p>
+                            }
+
+                            <h6 class="mt-4">Indirect Group Memberships (via parent groups)</h6>
+                            @if (identityResult.IsLoadingIndirectGroups)
+                            {
+                                <div class="text-center py-3">
+                                    <div class="spinner-border spinner-border-sm text-secondary" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                    <span class="text-muted ms-2">Loading...</span>
+                                </div>
+                            }
+                            else if (identityResult.SecurityIndirectGroups.Any())
+                            {
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-striped table-hover">
+                                        <thead>
+                                            <tr>
+                                                <th>Group Name</th>
+                                                <th>Description</th>
+                                                <th>Child Group</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var group in identityResult.SecurityIndirectGroups)
+                                            {
+                                                <tr>
+                                                    <td><strong>@group.DisplayName</strong></td>
+                                                    <td>
+                                                        @if (!string.IsNullOrEmpty(group.Description))
+                                                        {
+                                                            <small class="text-muted">@group.Description</small>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="text-muted">-</span>
+                                                        }
+                                                    </td>
+                                                    <td>
+                                                        @if (group.ChildGroup != null)
+                                                        {
+                                                            <span class="badge bg-info">@group.ChildGroup.DisplayName</span>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="text-muted">-</span>
+                                                        }
+                                                    </td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                            else
+                            {
+                                <p class="text-muted">No indirect group memberships.</p>
+                            }
+
+                            <h6 class="mt-4">All Role Assignments (from all groups)</h6>
+                            @if (identityResult.IsLoadingGroupRoleAssignments)
+                            {
+                                <div class="text-center py-3">
+                                    <div class="spinner-border spinner-border-sm text-warning" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                    <span class="text-muted ms-2">Loading...</span>
+                                </div>
+                            }
+                            else
+                            {
+                                var allGroupRoleAssignments = GetAllRoleAssignmentsForIdentity(identityResult);
+                                if (allGroupRoleAssignments.Any())
+                                {
+                                    <div class="table-responsive">
+                                        <table class="table table-sm table-striped table-hover">
+                                            <thead>
+                                                <tr>
+                                                    <th>Role Name</th>
+                                                    <th>Scope</th>
+                                                    <th>Source</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @foreach (var ra in allGroupRoleAssignments)
+                                                {
+                                                    <tr>
+                                                        <td><strong>@ra.RoleName</strong></td>
+                                                        <td><code class="text-muted">@ra.Scope</code></td>
+                                                        <td><span class="badge bg-info">@ra.AssignedTo</span></td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <p class="text-muted">No role assignments from group memberships.</p>
+                                }
+                            }
+
+                            <h6 class="mt-4">API Permissions</h6>
+                            @if (identityResult.IsLoadingApiPermissions)
+                            {
+                                <div class="text-center py-3">
+                                    <div class="spinner-border spinner-border-sm text-dark" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                    <span class="text-muted ms-2">Loading...</span>
+                                </div>
+                            }
+                            else if (identityResult.ApiPermissions.Any())
+                            {
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-striped table-hover">
+                                        <thead>
+                                            <tr>
+                                                <th>Resource</th>
+                                                <th>Permission</th>
+                                                <th>Type</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var permission in identityResult.ApiPermissions)
+                                            {
+                                                <tr>
+                                                    <td><strong>@permission.ResourceDisplayName</strong></td>
+                                                    <td><code>@permission.PermissionValue</code></td>
+                                                    <td><span class="badge bg-secondary">@permission.PermissionType</span></td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                            else
+                            {
+                                <p class="text-muted">No API permissions found.</p>
+                            }
+
+                            <h6 class="mt-4">Key Vault Access Policies</h6>
+                            @if (identityResult.IsLoadingKeyVaultPolicies)
+                            {
+                                <div class="text-center py-3">
+                                    <div class="spinner-border spinner-border-sm text-info" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                    <span class="text-muted ms-2">Loading...</span>
+                                </div>
+                            }
+                            else if (identityResult.KeyVaultAccessPolicies.Any())
+                            {
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-striped table-hover">
+                                        <thead>
+                                            <tr>
+                                                <th>Key Vault</th>
+                                                <th>Assigned To</th>
+                                                <th>Key Permissions</th>
+                                                <th>Secret Permissions</th>
+                                                <th>Certificate Permissions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var policy in identityResult.KeyVaultAccessPolicies)
+                                            {
+                                                <tr>
+                                                    <td>
+                                                        <strong>@policy.KeyVaultName</strong>
+                                                        <br />
+                                                        <small class="text-muted"><code>@policy.KeyVaultId</code></small>
+                                                    </td>
+                                                    <td><span class="badge bg-info">@policy.AssignedTo</span></td>
+                                                    <td>
+                                                        @if (policy.KeyPermissions.Any())
+                                                        {
+                                                            <span>@string.Join(", ", policy.KeyPermissions)</span>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="text-muted">None</span>
+                                                        }
+                                                    </td>
+                                                    <td>
+                                                        @if (policy.SecretPermissions.Any())
+                                                        {
+                                                            <span>@string.Join(", ", policy.SecretPermissions)</span>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="text-muted">None</span>
+                                                        }
+                                                    </td>
+                                                    <td>
+                                                        @if (policy.CertificatePermissions.Any())
+                                                        {
+                                                            <span>@string.Join(", ", policy.CertificatePermissions)</span>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="text-muted">None</span>
+                                                        }
+                                                    </td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                            else
+                            {
+                                <p class="text-muted">No Key Vault access policies found for this identity or its groups.</p>
                             }
                         </div>
                     }
@@ -197,7 +444,18 @@
     {
         public ManagedIdentityResourceDto Identity { get; set; } = new();
         public List<RoleAssignment> DirectRoleAssignments { get; set; } = new();
+        public List<SecurityGroup> SecurityDirectGroups { get; set; } = new();
+        public List<SecurityGroup> SecurityIndirectGroups { get; set; } = new();
+        public List<ApiPermission> ApiPermissions { get; set; } = new();
+        public List<KeyVaultAccessPolicy> KeyVaultAccessPolicies { get; set; } = new();
+        
+        // Loading states
         public bool IsLoadingRoleAssignments { get; set; } = false;
+        public bool IsLoadingDirectGroups { get; set; } = false;
+        public bool IsLoadingIndirectGroups { get; set; } = false;
+        public bool IsLoadingGroupRoleAssignments { get; set; } = false;
+        public bool IsLoadingApiPermissions { get; set; } = false;
+        public bool IsLoadingKeyVaultPolicies { get; set; } = false;
     }
 
     private async Task SearchByTag()
@@ -230,16 +488,38 @@
             {
                 Identity = mi,
                 DirectRoleAssignments = new List<RoleAssignment>(),
-                IsLoadingRoleAssignments = true
+                SecurityDirectGroups = new List<SecurityGroup>(),
+                SecurityIndirectGroups = new List<SecurityGroup>(),
+                ApiPermissions = new List<ApiPermission>(),
+                KeyVaultAccessPolicies = new List<KeyVaultAccessPolicy>(),
+                IsLoadingRoleAssignments = true,
+                IsLoadingDirectGroups = true,
+                IsLoadingIndirectGroups = true,
+                IsLoadingGroupRoleAssignments = true,
+                IsLoadingApiPermissions = true,
+                IsLoadingKeyVaultPolicies = true
             }).ToList();
 
             StateHasChanged(); // Show the identities first
 
-            // Load role assignments for each identity in parallel
+            // Load all data for each identity in parallel
             var tasks = identityResults.Select(async identityResult =>
             {
+                // Create an Identity object from the ManagedIdentityResourceDto
+                var identity = new Identity
+                {
+                    ObjectId = identityResult.Identity.PrincipalId,
+                    Name = identityResult.Identity.ResourceName,
+                    Type = identityResult.Identity.IdentityType == "SystemAssigned" 
+                        ? IdentityType.SystemAssignedManagedIdentity 
+                        : IdentityType.UserAssignedManagedIdentity,
+                    ResourceGroup = identityResult.Identity.ResourceGroup,
+                    SubscriptionId = identityResult.Identity.SubscriptionId
+                };
+
                 try
                 {
+                    // Load direct role assignments
                     var roleAssignments = await _resourceGraphService.FetchRoleAssignmentsForPrincipalsAsync(
                         new List<string> { identityResult.Identity.PrincipalId });
 
@@ -252,15 +532,86 @@
                             AssignedTo = "Direct Assignment"
                         })
                         .ToList();
+                    identityResult.IsLoadingRoleAssignments = false;
+                    StateHasChanged();
                 }
                 catch (Exception ex)
                 {
-                    // Log but don't fail the whole operation
                     Logger.LogError(ex, "Error loading role assignments for {PrincipalId}", identityResult.Identity.PrincipalId);
-                }
-                finally
-                {
                     identityResult.IsLoadingRoleAssignments = false;
+                    StateHasChanged();
+                }
+
+                try
+                {
+                    // Load direct groups
+                    identityResult.SecurityDirectGroups = await _roleAssignmentService.GetDirectGroupsAsync(identity);
+                    identityResult.IsLoadingDirectGroups = false;
+                    StateHasChanged();
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex, "Error loading direct groups for {PrincipalId}", identityResult.Identity.PrincipalId);
+                    identityResult.IsLoadingDirectGroups = false;
+                    StateHasChanged();
+                }
+
+                try
+                {
+                    // Load indirect groups (transitive)
+                    identityResult.SecurityIndirectGroups = await _roleAssignmentService.GetIndirectGroupsAsync(
+                        identityResult.SecurityDirectGroups, useParallelProcessing: false);
+                    identityResult.IsLoadingIndirectGroups = false;
+                    StateHasChanged();
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex, "Error loading indirect groups for {PrincipalId}", identityResult.Identity.PrincipalId);
+                    identityResult.IsLoadingIndirectGroups = false;
+                    StateHasChanged();
+                }
+
+                try
+                {
+                    // Populate group role assignments
+                    await _roleAssignmentService.PopulateGroupRoleAssignmentsAsync(
+                        identityResult.SecurityDirectGroups, identityResult.SecurityIndirectGroups);
+                    identityResult.IsLoadingGroupRoleAssignments = false;
+                    StateHasChanged();
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex, "Error loading group role assignments for {PrincipalId}", identityResult.Identity.PrincipalId);
+                    identityResult.IsLoadingGroupRoleAssignments = false;
+                    StateHasChanged();
+                }
+
+                try
+                {
+                    // Load API permissions
+                    identityResult.ApiPermissions = await _roleAssignmentService.GetApiPermissionsAsync(identity);
+                    identityResult.IsLoadingApiPermissions = false;
+                    StateHasChanged();
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex, "Error loading API permissions for {PrincipalId}", identityResult.Identity.PrincipalId);
+                    identityResult.IsLoadingApiPermissions = false;
+                    StateHasChanged();
+                }
+
+                try
+                {
+                    // Load Key Vault access policies
+                    identityResult.KeyVaultAccessPolicies = await _roleAssignmentService.GetKeyVaultAccessPoliciesAsync(
+                        identity, identityResult.SecurityDirectGroups, identityResult.SecurityIndirectGroups);
+                    identityResult.IsLoadingKeyVaultPolicies = false;
+                    StateHasChanged();
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex, "Error loading Key Vault policies for {PrincipalId}", identityResult.Identity.PrincipalId);
+                    identityResult.IsLoadingKeyVaultPolicies = false;
                     StateHasChanged();
                 }
             });
@@ -289,6 +640,38 @@
         {
             collapsedIdentities.Add(principalId);
         }
+    }
+
+    private List<RoleAssignment> GetAllRoleAssignmentsForIdentity(IdentityResultWithRoles identityResult)
+    {
+        var allRoleAssignments = new List<RoleAssignment>();
+        var processedIds = new HashSet<string>();
+
+        // Collect role assignments from all groups
+        void CollectRoleAssignments(SecurityGroup group)
+        {
+            foreach (var ra in group.RoleAssignments)
+            {
+                // Use a combination of role name and scope as unique identifier
+                var key = $"{ra.RoleName}|{ra.Scope}";
+                if (!processedIds.Contains(key))
+                {
+                    processedIds.Add(key);
+                    allRoleAssignments.Add(ra);
+                }
+            }
+        }
+
+        foreach (var group in identityResult.SecurityDirectGroups)
+        {
+            CollectRoleAssignments(group);
+        }
+        foreach (var group in identityResult.SecurityIndirectGroups)
+        {
+            CollectRoleAssignments(group);
+        }
+
+        return allRoleAssignments;
     }
 
     private async Task DownloadExcel()
