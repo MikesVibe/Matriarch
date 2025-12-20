@@ -21,6 +21,7 @@
     <PackageReference Include="Microsoft.Graph.Beta" Version="5.126.0-preview" />
     <PackageReference Include="Microsoft.Graph.Core" Version="3.2.4" />
     <PackageReference Include="Azure.Identity" Version="1.17.0" />
+    <PackageReference Include="ClosedXML" Version="0.104.2" />
   </ItemGroup>
 
 </Project>
