@@ -3,6 +3,8 @@
 @using Matriarch.Web.Models
 @using Matriarch.Web.Services
 @inject IRoleAssignmentService _roleAssignmentService
+@inject IExcelExportService _excelExportService
+@inject IJSRuntime JSRuntime
 @rendermode InteractiveServer
 
 <PageTitle>Identity Role Assignments</PageTitle>
@@ -235,6 +237,18 @@
             </div>
         </div>
     </div>
+
+    @if (IsDataFullyLoaded())
+    {
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <button class="btn btn-success btn-lg" @onclick="DownloadExcel">
+                    <i class="bi bi-download me-2"></i>
+                    Download Results as Excel
+                </button>
+            </div>
+        </div>
+    }
 
     <div class="row mb-4">
         <div class="col-md-12">
@@ -818,5 +832,47 @@
         }
 
         return allRoleAssignments;
+    }
+
+    private bool IsDataFullyLoaded()
+    {
+        // Check if all loading states are false, meaning all data has been fetched
+        return !isLoadingDirectRoleAssignments 
+            && !isLoadingDirectGroups 
+            && !isLoadingIndirectGroups 
+            && !isLoadingGroupRoleAssignments 
+            && !isLoadingApiPermissions 
+            && !isLoadingKeyVaultPolicies;
+    }
+
+    private async Task DownloadExcel()
+    {
+        if (result == null)
+        {
+            return;
+        }
+
+        try
+        {
+            // Generate Excel file
+            var excelBytes = _excelExportService.ExportToExcel(result);
+
+            // Create filename with identity name and timestamp
+            var fileName = $"RoleAssignments_{SanitizeFileName(result.Identity.Name)}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+
+            // Download file using JavaScript interop
+            await JSRuntime.InvokeVoidAsync("downloadFile", fileName, Convert.ToBase64String(excelBytes));
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"An error occurred while generating the Excel file: {ex.Message}";
+        }
+    }
+
+    private string SanitizeFileName(string fileName)
+    {
+        // Remove invalid characters from filename
+        var invalidChars = Path.GetInvalidFileNameChars();
+        return string.Join("_", fileName.Split(invalidChars, StringSplitOptions.RemoveEmptyEntries)).TrimEnd('.');
     }
 }
