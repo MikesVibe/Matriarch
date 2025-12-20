@@ -5,6 +5,7 @@
 @inject IRoleAssignmentService _roleAssignmentService
 @inject IExcelExportService _excelExportService
 @inject IJSRuntime JSRuntime
+@inject ILogger<TagSearch> Logger
 @rendermode InteractiveServer
 
 <PageTitle>Tag Search</PageTitle>
@@ -255,7 +256,7 @@
                 catch (Exception ex)
                 {
                     // Log but don't fail the whole operation
-                    Console.WriteLine($"Error loading role assignments for {identityResult.Identity.PrincipalId}: {ex.Message}");
+                    Logger.LogError(ex, "Error loading role assignments for {PrincipalId}", identityResult.Identity.PrincipalId);
                 }
                 finally
                 {
@@ -299,34 +300,65 @@
 
         try
         {
-            // Combine all results into a single export
-            var combinedResults = identityResults.Select(ir => new IdentityRoleAssignmentResult
+            // Create a combined workbook with all identities
+            using var workbook = new ClosedXML.Excel.XLWorkbook();
+            
+            // Add a summary worksheet
+            var summarySheet = workbook.Worksheets.Add("Summary");
+            summarySheet.Cell(1, 1).Value = "Resource Name";
+            summarySheet.Cell(1, 2).Value = "Identity Type";
+            summarySheet.Cell(1, 3).Value = "Principal ID";
+            summarySheet.Cell(1, 4).Value = "Resource Type";
+            summarySheet.Cell(1, 5).Value = "Resource Group";
+            summarySheet.Cell(1, 6).Value = "Subscription ID";
+            summarySheet.Cell(1, 7).Value = "Role Assignments Count";
+            
+            int summaryRow = 2;
+            foreach (var ir in identityResults)
             {
-                Identity = new Identity
-                {
-                    ObjectId = ir.Identity.PrincipalId,
-                    Name = ir.Identity.ResourceName,
-                    Type = ir.Identity.IdentityType == "SystemAssigned" 
-                        ? IdentityType.SystemAssignedManagedIdentity 
-                        : IdentityType.UserAssignedManagedIdentity,
-                    ResourceGroup = ir.Identity.ResourceGroup,
-                    SubscriptionId = ir.Identity.SubscriptionId
-                },
-                DirectRoleAssignments = ir.DirectRoleAssignments,
-                SecurityDirectGroups = new List<SecurityGroup>(),
-                SecurityIndirectGroups = new List<SecurityGroup>(),
-                ApiPermissions = new List<ApiPermission>(),
-                KeyVaultAccessPolicies = new List<KeyVaultAccessPolicy>()
-            }).ToList();
-
-            // For now, export the first one using existing export service
-            // TODO: Enhance export service to handle multiple identities
-            if (combinedResults.Any())
-            {
-                var excelBytes = _excelExportService.ExportToExcel(combinedResults[0]);
-                var fileName = $"TagSearch_{SanitizeFileName(tagValue)}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
-                await JSRuntime.InvokeVoidAsync("downloadFile", fileName, Convert.ToBase64String(excelBytes));
+                summarySheet.Cell(summaryRow, 1).Value = ir.Identity.ResourceName;
+                summarySheet.Cell(summaryRow, 2).Value = ir.Identity.IdentityType;
+                summarySheet.Cell(summaryRow, 3).Value = ir.Identity.PrincipalId;
+                summarySheet.Cell(summaryRow, 4).Value = ir.Identity.ResourceType;
+                summarySheet.Cell(summaryRow, 5).Value = ir.Identity.ResourceGroup;
+                summarySheet.Cell(summaryRow, 6).Value = ir.Identity.SubscriptionId;
+                summarySheet.Cell(summaryRow, 7).Value = ir.DirectRoleAssignments.Count;
+                summaryRow++;
             }
+            
+            // Auto-fit columns
+            summarySheet.Columns().AdjustToContents();
+            
+            // Add a role assignments worksheet with all assignments
+            var assignmentsSheet = workbook.Worksheets.Add("All Role Assignments");
+            assignmentsSheet.Cell(1, 1).Value = "Resource Name";
+            assignmentsSheet.Cell(1, 2).Value = "Principal ID";
+            assignmentsSheet.Cell(1, 3).Value = "Role Name";
+            assignmentsSheet.Cell(1, 4).Value = "Scope";
+            
+            int assignmentRow = 2;
+            foreach (var ir in identityResults)
+            {
+                foreach (var ra in ir.DirectRoleAssignments)
+                {
+                    assignmentsSheet.Cell(assignmentRow, 1).Value = ir.Identity.ResourceName;
+                    assignmentsSheet.Cell(assignmentRow, 2).Value = ir.Identity.PrincipalId;
+                    assignmentsSheet.Cell(assignmentRow, 3).Value = ra.RoleName;
+                    assignmentsSheet.Cell(assignmentRow, 4).Value = ra.Scope;
+                    assignmentRow++;
+                }
+            }
+            
+            // Auto-fit columns
+            assignmentsSheet.Columns().AdjustToContents();
+            
+            // Save to memory stream
+            using var stream = new MemoryStream();
+            workbook.SaveAs(stream);
+            var excelBytes = stream.ToArray();
+            
+            var fileName = $"TagSearch_{SanitizeFileName(tagValue)}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+            await JSRuntime.InvokeVoidAsync("downloadFile", fileName, Convert.ToBase64String(excelBytes));
         }
         catch (Exception ex)
         {
