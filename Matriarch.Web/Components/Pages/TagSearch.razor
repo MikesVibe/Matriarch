@@ -1,11 +1,19 @@
 @page "/tagsearch"
 @using Matriarch.Web.Models
 @using Matriarch.Web.Services
+@using Microsoft.Graph.Beta
+@using Microsoft.Graph.Beta.Models
+@using Microsoft.Kiota.Abstractions
+@using Azure.Identity
+@using GraphRoleAssignment = Microsoft.Graph.Beta.Models.RoleAssignment
+@using AppRoleAssignment = Matriarch.Web.Models.RoleAssignment
+@using AppIdentity = Matriarch.Web.Models.Identity
 @inject IResourceGraphService _resourceGraphService
 @inject IRoleAssignmentService _roleAssignmentService
 @inject IExcelExportService _excelExportService
 @inject IJSRuntime JSRuntime
 @inject ILogger<TagSearch> Logger
+@inject Matriarch.Web.Configuration.AppSettings AppSettings
 @rendermode InteractiveServer
 
 <PageTitle>Tag Search</PageTitle>
@@ -515,7 +523,7 @@
     private class IdentityResultWithRoles
     {
         public ManagedIdentityResourceDto Identity { get; set; } = new();
-        public List<RoleAssignment> DirectRoleAssignments { get; set; } = new();
+        public List<AppRoleAssignment> DirectRoleAssignments { get; set; } = new();
         public List<SecurityGroup> SecurityDirectGroups { get; set; } = new();
         public List<SecurityGroup> SecurityIndirectGroups { get; set; } = new();
         public List<ApiPermission> ApiPermissions { get; set; } = new();
@@ -547,8 +555,14 @@
 
         try
         {
-            // Fetch all managed identities by tag
+            // Fetch all managed identities by tag from Azure Resource Graph
             allManagedIdentities = await _resourceGraphService.FetchManagedIdentitiesByTagAsync(tagValue);
+
+            // Fetch App Registrations/Service Principals with matching tags from Microsoft Graph
+            var servicePrincipalsWithTag = await FetchServicePrincipalsByTagAsync(tagValue);
+            
+            // Combine both lists
+            allManagedIdentities.AddRange(servicePrincipalsWithTag);
 
             if (!allManagedIdentities.Any())
             {
@@ -565,12 +579,99 @@
         catch (Exception ex)
         {
             errorMessage = $"An error occurred while searching: {ex.Message}";
+            Logger.LogError(ex, "Error searching for identities with tag {TagValue}", tagValue);
         }
         finally
         {
             isLoading = false;
             StateHasChanged();
         }
+    }
+
+    private async Task<List<ManagedIdentityResourceDto>> FetchServicePrincipalsByTagAsync(string tagValue)
+    {
+        var results = new List<ManagedIdentityResourceDto>();
+        
+        try
+        {
+            // Create Graph client
+            var credential = new ClientSecretCredential(
+                AppSettings.Azure.TenantId,
+                AppSettings.Azure.ClientId,
+                AppSettings.Azure.ClientSecret);
+            var graphClient = new GraphServiceClient(credential);
+
+            // Construct the tag we're looking for: "backstage-owner-ref:tagValue"
+            var searchTag = $"backstage-owner-ref:{tagValue}";
+            
+            Logger.LogInformation("Searching for service principals with tag: {SearchTag}", searchTag);
+
+            // Query service principals with tags containing our search string
+            // Note: Microsoft Graph API doesn't support filtering by tags array contains,
+            // so we need to fetch and filter
+            var allServicePrincipals = new List<ServicePrincipal>();
+            var servicePrincipalsResponse = await graphClient.ServicePrincipals
+                .GetAsync(requestConfiguration =>
+                {
+                    requestConfiguration.QueryParameters.Select = new[] { "id", "appId", "displayName", "tags" };
+                    requestConfiguration.QueryParameters.Top = 999;
+                });
+
+            // Collect all pages
+            while (servicePrincipalsResponse != null)
+            {
+                if (servicePrincipalsResponse.Value != null)
+                {
+                    allServicePrincipals.AddRange(servicePrincipalsResponse.Value);
+                }
+                
+                // Check if there's a next page
+                if (!string.IsNullOrEmpty(servicePrincipalsResponse.OdataNextLink))
+                {
+                    // Get next page - simpler approach using the next link
+                    servicePrincipalsResponse = await graphClient.ServicePrincipals
+                        .WithUrl(servicePrincipalsResponse.OdataNextLink)
+                        .GetAsync();
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            // Filter service principals that have the matching tag
+            var matchingServicePrincipals = allServicePrincipals
+                .Where(sp => sp.Tags != null && sp.Tags.Any(tag => 
+                    tag.Equals(searchTag, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+
+            Logger.LogInformation("Found {Count} service principals with tag {SearchTag}", 
+                matchingServicePrincipals.Count, searchTag);
+
+            // Convert to ManagedIdentityResourceDto format
+            foreach (var sp in matchingServicePrincipals)
+            {
+                results.Add(new ManagedIdentityResourceDto
+                {
+                    SubscriptionId = "", // Service principals are tenant-level, not subscription-specific
+                    ResourceGroup = "", // Service principals don't belong to resource groups
+                    ResourceId = $"/servicePrincipals/{sp.Id}",
+                    ResourceName = sp.DisplayName ?? sp.AppId ?? sp.Id ?? "Unknown",
+                    ResourceType = "Microsoft.Graph/servicePrincipals",
+                    IdentityType = "ServicePrincipal",
+                    PrincipalId = sp.Id ?? "",
+                    TenantId = AppSettings.Azure.TenantId,
+                    ManagedIdentityResourceId = ""
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error fetching service principals with tag {TagValue}", tagValue);
+            // Don't throw - just log and return empty list so managed identities can still be shown
+        }
+
+        return results;
     }
 
     private async Task LoadPage(int pageNumber)
@@ -588,7 +689,7 @@
         identityResults = pagedIdentities.Select(mi => new IdentityResultWithRoles
             {
                 Identity = mi,
-                DirectRoleAssignments = new List<RoleAssignment>(),
+                DirectRoleAssignments = new List<AppRoleAssignment>(),
                 SecurityDirectGroups = new List<SecurityGroup>(),
                 SecurityIndirectGroups = new List<SecurityGroup>(),
                 ApiPermissions = new List<ApiPermission>(),
@@ -607,13 +708,15 @@
             var tasks = identityResults.Select(async identityResult =>
             {
                 // Create an Identity object from the ManagedIdentityResourceDto
-                var identity = new Identity
+                var identity = new AppIdentity
                 {
                     ObjectId = identityResult.Identity.PrincipalId,
                     Name = identityResult.Identity.ResourceName,
                     Type = identityResult.Identity.IdentityType == "SystemAssigned" 
                         ? IdentityType.SystemAssignedManagedIdentity 
-                        : IdentityType.UserAssignedManagedIdentity,
+                        : (identityResult.Identity.IdentityType == "UserAssigned"
+                            ? IdentityType.UserAssignedManagedIdentity
+                            : IdentityType.ServicePrincipal),
                     ResourceGroup = identityResult.Identity.ResourceGroup,
                     SubscriptionId = identityResult.Identity.SubscriptionId
                 };
@@ -625,7 +728,7 @@
                         new List<string> { identityResult.Identity.PrincipalId });
 
                     identityResult.DirectRoleAssignments = roleAssignments
-                        .Select(ra => new RoleAssignment
+                        .Select(ra => new AppRoleAssignment
                         {
                             Id = ra.Id,
                             RoleName = ra.RoleName,
@@ -757,9 +860,9 @@
         }
     }
 
-    private List<RoleAssignment> GetAllRoleAssignmentsForIdentity(IdentityResultWithRoles identityResult)
+    private List<AppRoleAssignment> GetAllRoleAssignmentsForIdentity(IdentityResultWithRoles identityResult)
     {
-        var allRoleAssignments = new List<RoleAssignment>();
+        var allRoleAssignments = new List<AppRoleAssignment>();
         var processedIds = new HashSet<string>();
 
         // Collect role assignments from all groups
@@ -801,13 +904,15 @@
             // Convert identityResults to IdentityRoleAssignmentResult list
             var results = identityResults.Select(ir => new IdentityRoleAssignmentResult
             {
-                Identity = new Identity
+                Identity = new AppIdentity
                 {
                     ObjectId = ir.Identity.PrincipalId,
                     Name = ir.Identity.ResourceName,
                     Type = ir.Identity.IdentityType == "SystemAssigned" 
                         ? IdentityType.SystemAssignedManagedIdentity 
-                        : IdentityType.UserAssignedManagedIdentity,
+                        : (ir.Identity.IdentityType == "UserAssigned"
+                            ? IdentityType.UserAssignedManagedIdentity
+                            : IdentityType.ServicePrincipal),
                     ResourceGroup = ir.Identity.ResourceGroup,
                     SubscriptionId = ir.Identity.SubscriptionId
                 },
