@@ -19,6 +19,11 @@ public class AzureResourceGraphService : IResourceGraphService
     private readonly HttpClient _httpClient;
     private readonly AppSettings _settings;
     private const string ResourceGraphApiEndpoint = "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01";
+    
+    // Global throttling state - shared across all instances and threads
+    private static readonly SemaphoreSlim _throttleSemaphore = new SemaphoreSlim(1, 1);
+    private static DateTime _throttleUntil = DateTime.MinValue;
+    private static readonly object _throttleLock = new object();
 
     public AzureResourceGraphService(
         AppSettings settings,
@@ -165,28 +170,36 @@ public class AzureResourceGraphService : IResourceGraphService
 
         for (int attempt = 0; attempt <= maxRetries; attempt++)
         {
+            // Check if we're in a global throttle period
+            await WaitForThrottleClearanceAsync();
+            
             try
             {
                 // Clone the request for retry attempts (HttpRequestMessage can only be sent once)
                 var requestClone = await CloneHttpRequestMessageAsync(request);
                 var response = await _httpClient.SendAsync(requestClone);
 
-                // If we get a 429 or 503, retry with exponential backoff
+                // If we get a 429 or 503, set global throttle and retry with exponential backoff
                 if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests || 
                     response.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable)
                 {
                     if (attempt < maxRetries)
                     {
                         // Extract retry-after header if available
-                        var retryAfter = response.Headers.RetryAfter?.Delta?.TotalMilliseconds ?? 
+                        var retryAfterMs = response.Headers.RetryAfter?.Delta?.TotalMilliseconds ?? 
                                        (baseDelay * Math.Pow(2, attempt));
                         
-                        _logger.LogWarning(
-                            "Received {StatusCode} from Azure Resource Graph API. Retry attempt {Attempt}/{MaxRetries}. Waiting {DelayMs}ms before retry.",
-                            (int)response.StatusCode, attempt + 1, maxRetries, retryAfter);
+                        // Set global throttle to block all parallel requests
+                        SetGlobalThrottle(retryAfterMs);
                         
-                        await Task.Delay(TimeSpan.FromMilliseconds(retryAfter));
+                        _logger.LogWarning(
+                            "Received {StatusCode} from Azure Resource Graph API. Global throttle activated for {DelayMs}ms. Retry attempt {Attempt}/{MaxRetries}.",
+                            (int)response.StatusCode, retryAfterMs, attempt + 1, maxRetries);
+                        
                         response.Dispose();
+                        
+                        // Wait for the throttle period
+                        await Task.Delay(TimeSpan.FromMilliseconds(retryAfterMs));
                         continue;
                     }
                     else
@@ -198,23 +211,85 @@ public class AzureResourceGraphService : IResourceGraphService
                     }
                 }
 
+                // Success - clear any throttle state
+                ClearGlobalThrottle();
+                
                 // For other status codes, ensure success or throw
                 response.EnsureSuccessStatusCode();
                 return response;
             }
             catch (HttpRequestException ex) when (attempt < maxRetries)
             {
+                var delayMs = baseDelay * Math.Pow(2, attempt);
+                
                 _logger.LogWarning(ex, 
                     "HTTP request failed. Retry attempt {Attempt}/{MaxRetries}. Waiting {DelayMs}ms before retry.",
-                    attempt + 1, maxRetries, baseDelay * Math.Pow(2, attempt));
+                    attempt + 1, maxRetries, delayMs);
                 
-                await Task.Delay(TimeSpan.FromMilliseconds(baseDelay * Math.Pow(2, attempt)));
+                await Task.Delay(TimeSpan.FromMilliseconds(delayMs));
             }
         }
 
         // Should not reach here, but if we do, make one final attempt
         var finalRequest = await CloneHttpRequestMessageAsync(request);
         return await _httpClient.SendAsync(finalRequest);
+    }
+
+    private async Task WaitForThrottleClearanceAsync()
+    {
+        while (true)
+        {
+            DateTime throttleUntil;
+            lock (_throttleLock)
+            {
+                throttleUntil = _throttleUntil;
+            }
+
+            if (throttleUntil <= DateTime.UtcNow)
+            {
+                // Throttle period has passed
+                return;
+            }
+
+            var waitTime = throttleUntil - DateTime.UtcNow;
+            if (waitTime.TotalMilliseconds > 0)
+            {
+                _logger.LogInformation(
+                    "Waiting for global throttle clearance. Time remaining: {WaitMs}ms",
+                    waitTime.TotalMilliseconds);
+                
+                await Task.Delay(waitTime);
+            }
+        }
+    }
+
+    private void SetGlobalThrottle(double delayMs)
+    {
+        lock (_throttleLock)
+        {
+            var throttleUntil = DateTime.UtcNow.AddMilliseconds(delayMs);
+            
+            // Only update if the new throttle period extends beyond the current one
+            if (throttleUntil > _throttleUntil)
+            {
+                _throttleUntil = throttleUntil;
+                _logger.LogWarning(
+                    "Global throttle set until {ThrottleUntil} (UTC). All Azure Resource Graph API requests will wait.",
+                    _throttleUntil);
+            }
+        }
+    }
+
+    private void ClearGlobalThrottle()
+    {
+        lock (_throttleLock)
+        {
+            if (_throttleUntil > DateTime.MinValue)
+            {
+                _throttleUntil = DateTime.MinValue;
+                _logger.LogInformation("Global throttle cleared. Azure Resource Graph API is accessible.");
+            }
+        }
     }
 
     private async Task<HttpRequestMessage> CloneHttpRequestMessageAsync(HttpRequestMessage request)
