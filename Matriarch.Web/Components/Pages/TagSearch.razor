@@ -622,12 +622,15 @@
             // First, query service principals with tags containing our search string
             // Note: Microsoft Graph API doesn't support filtering by tags array contains,
             // so we need to fetch and filter
+            // Important: Use ConsistencyLevel=eventual to get all tags, including for cross-tenant apps
             var allServicePrincipals = new List<ServicePrincipal>();
             var servicePrincipalsResponse = await graphClient.ServicePrincipals
                 .GetAsync(requestConfiguration =>
                 {
                     requestConfiguration.QueryParameters.Select = new[] { "id", "appId", "displayName", "tags" };
                     requestConfiguration.QueryParameters.Top = 999;
+                    requestConfiguration.QueryParameters.Count = true;
+                    requestConfiguration.Headers.Add("ConsistencyLevel", "eventual");
                 });
 
             // Collect all pages
@@ -662,12 +665,15 @@
 
             // Additionally, query applications to check serviceManagementReference property
             // Note: ServiceManagementReference is a property on Application, not ServicePrincipal
+            // Use ConsistencyLevel=eventual for complete results
             var allApplications = new List<Application>();
             var applicationsResponse = await graphClient.Applications
                 .GetAsync(requestConfiguration =>
                 {
                     requestConfiguration.QueryParameters.Select = new[] { "id", "appId", "displayName", "serviceManagementReference" };
                     requestConfiguration.QueryParameters.Top = 999;
+                    requestConfiguration.QueryParameters.Count = true;
+                    requestConfiguration.Headers.Add("ConsistencyLevel", "eventual");
                 });
 
             // Collect all pages
