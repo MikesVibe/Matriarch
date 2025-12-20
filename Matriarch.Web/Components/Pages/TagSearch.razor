@@ -626,7 +626,7 @@
             var servicePrincipalsResponse = await graphClient.ServicePrincipals
                 .GetAsync(requestConfiguration =>
                 {
-                    requestConfiguration.QueryParameters.Select = new[] { "id", "appId", "displayName", "tags" };
+                    requestConfiguration.QueryParameters.Select = new[] { "id", "appId", "displayName", "tags", "serviceManagementReference" };
                     requestConfiguration.QueryParameters.Top = 999;
                 });
 
@@ -652,13 +652,15 @@
                 }
             }
 
-            // Filter service principals that have the matching tag
+            // Filter service principals that have the matching tag in their tags array
+            // OR have the tag value in their serviceManagementReference property
             var matchingServicePrincipals = allServicePrincipals
-                .Where(sp => sp.Tags != null && sp.Tags.Any(tag => 
-                    tag.Equals(searchTag, StringComparison.OrdinalIgnoreCase)))
+                .Where(sp => 
+                    (sp.Tags != null && sp.Tags.Any(tag => tag.Equals(searchTag, StringComparison.OrdinalIgnoreCase))) ||
+                    (!string.IsNullOrEmpty(sp.ServiceManagementReference) && sp.ServiceManagementReference.Equals(tagValue, StringComparison.OrdinalIgnoreCase)))
                 .ToList();
 
-            Logger.LogInformation("Found {Count} service principals with tag {SearchTag}", 
+            Logger.LogInformation("Found {Count} service principals with tag {SearchTag} (in tags array or serviceManagementReference)", 
                 matchingServicePrincipals.Count, searchTag);
 
             // Convert to ManagedIdentityResourceDto format
