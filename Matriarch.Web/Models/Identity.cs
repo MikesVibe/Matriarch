@@ -51,6 +51,20 @@ public class SecurityGroup
     public List<SecurityGroup> ParentGroups { get; set; } = new();
 }
 
+public class KeyVaultAccessPolicy
+{
+    public string KeyVaultName { get; set; } = string.Empty;
+    public string KeyVaultId { get; set; } = string.Empty;
+    public string TenantId { get; set; } = string.Empty;
+    public string ObjectId { get; set; } = string.Empty;
+    public string ApplicationId { get; set; } = string.Empty;
+    public List<string> KeyPermissions { get; set; } = new();
+    public List<string> SecretPermissions { get; set; } = new();
+    public List<string> CertificatePermissions { get; set; } = new();
+    public List<string> StoragePermissions { get; set; } = new();
+    public string AssignedTo { get; set; } = string.Empty; // Name of the identity or group that has this policy
+}
+
 public class IdentityRoleAssignmentResult
 {
     public Identity Identity { get; set; } = new();
@@ -58,6 +72,7 @@ public class IdentityRoleAssignmentResult
     public List<SecurityGroup> SecurityDirectGroups { get; set; } = new();
     public List<SecurityGroup> SecurityIndirectGroups { get; set; } = new();
     public List<ApiPermission> ApiPermissions { get; set; } = new();
+    public List<KeyVaultAccessPolicy> KeyVaultAccessPolicies { get; set; } = new();
 }
 
 public class IdentitySearchResult
