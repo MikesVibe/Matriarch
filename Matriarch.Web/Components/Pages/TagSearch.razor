@@ -556,19 +556,32 @@
         try
         {
             // Fetch all managed identities by tag from Azure Resource Graph
-            allManagedIdentities = await _resourceGraphService.FetchManagedIdentitiesByTagAsync(tagValue);
+            var managedIdentitiesFromAzure = await _resourceGraphService.FetchManagedIdentitiesByTagAsync(tagValue);
 
             // Fetch App Registrations/Service Principals with matching tags from Microsoft Graph
             var servicePrincipalsWithTag = await FetchServicePrincipalsByTagAsync(tagValue);
             
             // Combine both lists
-            allManagedIdentities.AddRange(servicePrincipalsWithTag);
+            var allIdentities = managedIdentitiesFromAzure.Concat(servicePrincipalsWithTag).ToList();
+
+            // Deduplicate by PrincipalId (ObjectId) - keep only first occurrence of each unique ObjectId
+            // This prevents fetching data multiple times for the same identity
+            allManagedIdentities = allIdentities
+                .GroupBy(mi => mi.PrincipalId)
+                .Select(g => g.First())
+                .ToList();
 
             if (!allManagedIdentities.Any())
             {
                 errorMessage = $"No identities found with tag value '{tagValue}'.";
                 totalIdentities = 0;
                 return;
+            }
+
+            var duplicateCount = allIdentities.Count - allManagedIdentities.Count;
+            if (duplicateCount > 0)
+            {
+                Logger.LogInformation("Deduplicated {DuplicateCount} identities with same ObjectId", duplicateCount);
             }
 
             totalIdentities = allManagedIdentities.Count;
