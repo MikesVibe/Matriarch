@@ -5,4 +5,5 @@ namespace Matriarch.Web.Services;
 public interface IExcelExportService
 {
     byte[] ExportToExcel(IdentityRoleAssignmentResult result);
+    byte[] ExportMultipleIdentitiesToExcel(List<IdentityRoleAssignmentResult> results);
 }
