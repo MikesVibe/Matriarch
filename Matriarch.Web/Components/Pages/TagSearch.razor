@@ -617,16 +617,16 @@
             // Construct the tag we're looking for: "backstage-owner-ref:tagValue"
             var searchTag = $"backstage-owner-ref:{tagValue}";
             
-            Logger.LogInformation("Searching for service principals with tag: {SearchTag}", searchTag);
+            Logger.LogInformation("Searching for service principals and applications with tag: {SearchTag}", searchTag);
 
-            // Query service principals with tags containing our search string
+            // First, query service principals with tags containing our search string
             // Note: Microsoft Graph API doesn't support filtering by tags array contains,
             // so we need to fetch and filter
             var allServicePrincipals = new List<ServicePrincipal>();
             var servicePrincipalsResponse = await graphClient.ServicePrincipals
                 .GetAsync(requestConfiguration =>
                 {
-                    requestConfiguration.QueryParameters.Select = new[] { "id", "appId", "displayName", "tags", "serviceManagementReference" };
+                    requestConfiguration.QueryParameters.Select = new[] { "id", "appId", "displayName", "tags" };
                     requestConfiguration.QueryParameters.Top = 999;
                 });
 
@@ -653,15 +653,70 @@
             }
 
             // Filter service principals that have the matching tag in their tags array
-            // OR have the tag value in their serviceManagementReference property
             var matchingServicePrincipals = allServicePrincipals
-                .Where(sp => 
-                    (sp.Tags != null && sp.Tags.Any(tag => tag.Equals(searchTag, StringComparison.OrdinalIgnoreCase))) ||
-                    (!string.IsNullOrEmpty(sp.ServiceManagementReference) && sp.ServiceManagementReference.Equals(tagValue, StringComparison.OrdinalIgnoreCase)))
+                .Where(sp => sp.Tags != null && sp.Tags.Any(tag => tag.Equals(searchTag, StringComparison.OrdinalIgnoreCase)))
                 .ToList();
 
-            Logger.LogInformation("Found {Count} service principals with tag {SearchTag} (in tags array or serviceManagementReference)", 
+            Logger.LogInformation("Found {Count} service principals with tag {SearchTag} in tags array", 
                 matchingServicePrincipals.Count, searchTag);
+
+            // Additionally, query applications to check serviceManagementReference property
+            // Note: ServiceManagementReference is a property on Application, not ServicePrincipal
+            var allApplications = new List<Application>();
+            var applicationsResponse = await graphClient.Applications
+                .GetAsync(requestConfiguration =>
+                {
+                    requestConfiguration.QueryParameters.Select = new[] { "id", "appId", "displayName", "serviceManagementReference" };
+                    requestConfiguration.QueryParameters.Top = 999;
+                });
+
+            // Collect all pages
+            while (applicationsResponse != null)
+            {
+                if (applicationsResponse.Value != null)
+                {
+                    allApplications.AddRange(applicationsResponse.Value);
+                }
+                
+                // Check if there's a next page
+                if (!string.IsNullOrEmpty(applicationsResponse.OdataNextLink))
+                {
+                    applicationsResponse = await graphClient.Applications
+                        .WithUrl(applicationsResponse.OdataNextLink)
+                        .GetAsync();
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            // Filter applications by serviceManagementReference
+            var matchingApplications = allApplications
+                .Where(app => !string.IsNullOrEmpty(app.ServiceManagementReference) && 
+                             app.ServiceManagementReference.Equals(tagValue, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            Logger.LogInformation("Found {Count} applications with serviceManagementReference {TagValue}", 
+                matchingApplications.Count, tagValue);
+
+            // For matching applications, we need to find their corresponding service principals
+            foreach (var app in matchingApplications)
+            {
+                // Check if we already have this service principal in our list (by AppId)
+                if (!matchingServicePrincipals.Any(sp => sp.AppId == app.AppId))
+                {
+                    // Find the service principal for this application
+                    var spForApp = allServicePrincipals.FirstOrDefault(sp => sp.AppId == app.AppId);
+                    if (spForApp != null)
+                    {
+                        matchingServicePrincipals.Add(spForApp);
+                    }
+                }
+            }
+
+            Logger.LogInformation("Total {Count} unique service principals found (tags array + serviceManagementReference)", 
+                matchingServicePrincipals.Count);
 
             // Convert to ManagedIdentityResourceDto format
             foreach (var sp in matchingServicePrincipals)
