@@ -232,9 +232,9 @@ public class ExcelExportService : IExcelExportService
         {
             worksheet.Cell(row, 1).Value = policy.KeyVaultName;
             worksheet.Cell(row, 2).Value = policy.AssignedTo;
-            worksheet.Cell(row, 3).Value = policy.KeyPermissions.Any() ? string.Join(", ", policy.KeyPermissions) : "None";
-            worksheet.Cell(row, 4).Value = policy.SecretPermissions.Any() ? string.Join(", ", policy.SecretPermissions) : "None";
-            worksheet.Cell(row, 5).Value = policy.CertificatePermissions.Any() ? string.Join(", ", policy.CertificatePermissions) : "None";
+            worksheet.Cell(row, 3).Value = FormatPermissions(policy.KeyPermissions);
+            worksheet.Cell(row, 4).Value = FormatPermissions(policy.SecretPermissions);
+            worksheet.Cell(row, 5).Value = FormatPermissions(policy.CertificatePermissions);
             row++;
         }
 
@@ -244,6 +244,11 @@ public class ExcelExportService : IExcelExportService
         headerRange.Style.Fill.BackgroundColor = XLColor.LightCyan;
 
         worksheet.Columns().AdjustToContents();
+    }
+
+    private string FormatPermissions(List<string> permissions)
+    {
+        return permissions.Any() ? string.Join(", ", permissions) : "None";
     }
 
     private string GetIdentityTypeDisplay(IdentityType identityType)
@@ -264,28 +269,28 @@ public class ExcelExportService : IExcelExportService
         var allRoleAssignments = new List<RoleAssignment>();
         var processedIds = new HashSet<string>();
 
-        void CollectRoleAssignments(SecurityGroup group)
-        {
-            foreach (var ra in group.RoleAssignments)
-            {
-                var key = $"{ra.RoleName}|{ra.Scope}";
-                if (!processedIds.Contains(key))
-                {
-                    processedIds.Add(key);
-                    allRoleAssignments.Add(ra);
-                }
-            }
-        }
-
         foreach (var group in result.SecurityDirectGroups)
         {
-            CollectRoleAssignments(group);
+            CollectRoleAssignments(group, allRoleAssignments, processedIds);
         }
         foreach (var group in result.SecurityIndirectGroups)
         {
-            CollectRoleAssignments(group);
+            CollectRoleAssignments(group, allRoleAssignments, processedIds);
         }
 
         return allRoleAssignments;
+    }
+
+    private void CollectRoleAssignments(SecurityGroup group, List<RoleAssignment> allRoleAssignments, HashSet<string> processedIds)
+    {
+        foreach (var ra in group.RoleAssignments)
+        {
+            var key = $"{ra.RoleName}|{ra.Scope}";
+            if (!processedIds.Contains(key))
+            {
+                processedIds.Add(key);
+                allRoleAssignments.Add(ra);
+            }
+        }
     }
 }
