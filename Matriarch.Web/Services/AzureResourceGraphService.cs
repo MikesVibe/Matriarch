@@ -17,6 +17,7 @@ public class AzureResourceGraphService : IResourceGraphService
     private readonly ILogger<AzureResourceGraphService> _logger;
     private readonly TokenCredential _credential;
     private readonly HttpClient _httpClient;
+    private readonly AppSettings _settings;
     private const string ResourceGraphApiEndpoint = "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01";
 
     public AzureResourceGraphService(
@@ -26,6 +27,7 @@ public class AzureResourceGraphService : IResourceGraphService
     {
         _logger = logger;
         _httpClient = httpClient;
+        _settings = settings;
 
         // Use ClientSecretCredential for authentication
         _credential = new ClientSecretCredential(
@@ -118,10 +120,10 @@ public class AzureResourceGraphService : IResourceGraphService
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
         request.Content = content;
 
-        var response = await _httpClient.SendAsync(request);
-        response.EnsureSuccessStatusCode();
-
+        var response = await SendRequestWithRetryAsync(request);
         var responseContent = await response.Content.ReadAsStringAsync();
+        response.Dispose();
+        
         return JsonDocument.Parse(responseContent);
     }
 
@@ -154,6 +156,94 @@ public class AzureResourceGraphService : IResourceGraphService
         }
 
         return roleAssignments;
+    }
+
+    private async Task<HttpResponseMessage> SendRequestWithRetryAsync(HttpRequestMessage request)
+    {
+        var maxRetries = _settings.Parallelization.MaxRetryAttempts;
+        var baseDelay = _settings.Parallelization.RetryDelayMilliseconds;
+
+        for (int attempt = 0; attempt <= maxRetries; attempt++)
+        {
+            try
+            {
+                // Clone the request for retry attempts (HttpRequestMessage can only be sent once)
+                var requestClone = await CloneHttpRequestMessageAsync(request);
+                var response = await _httpClient.SendAsync(requestClone);
+
+                // If we get a 429 or 503, retry with exponential backoff
+                if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests || 
+                    response.StatusCode == System.Net.HttpStatusCode.ServiceUnavailable)
+                {
+                    if (attempt < maxRetries)
+                    {
+                        // Extract retry-after header if available
+                        var retryAfter = response.Headers.RetryAfter?.Delta?.TotalMilliseconds ?? 
+                                       (baseDelay * Math.Pow(2, attempt));
+                        
+                        _logger.LogWarning(
+                            "Received {StatusCode} from Azure Resource Graph API. Retry attempt {Attempt}/{MaxRetries}. Waiting {DelayMs}ms before retry.",
+                            (int)response.StatusCode, attempt + 1, maxRetries, retryAfter);
+                        
+                        await Task.Delay(TimeSpan.FromMilliseconds(retryAfter));
+                        response.Dispose();
+                        continue;
+                    }
+                    else
+                    {
+                        _logger.LogError(
+                            "Received {StatusCode} from Azure Resource Graph API after {MaxRetries} retries. Failing request.",
+                            (int)response.StatusCode, maxRetries);
+                        response.EnsureSuccessStatusCode(); // This will throw
+                    }
+                }
+
+                // For other status codes, ensure success or throw
+                response.EnsureSuccessStatusCode();
+                return response;
+            }
+            catch (HttpRequestException ex) when (attempt < maxRetries)
+            {
+                _logger.LogWarning(ex, 
+                    "HTTP request failed. Retry attempt {Attempt}/{MaxRetries}. Waiting {DelayMs}ms before retry.",
+                    attempt + 1, maxRetries, baseDelay * Math.Pow(2, attempt));
+                
+                await Task.Delay(TimeSpan.FromMilliseconds(baseDelay * Math.Pow(2, attempt)));
+            }
+        }
+
+        // Should not reach here, but if we do, make one final attempt
+        var finalRequest = await CloneHttpRequestMessageAsync(request);
+        return await _httpClient.SendAsync(finalRequest);
+    }
+
+    private async Task<HttpRequestMessage> CloneHttpRequestMessageAsync(HttpRequestMessage request)
+    {
+        var clone = new HttpRequestMessage(request.Method, request.RequestUri)
+        {
+            Version = request.Version
+        };
+
+        // Copy headers
+        foreach (var header in request.Headers)
+        {
+            clone.Headers.TryAddWithoutValidation(header.Key, header.Value);
+        }
+
+        // Copy content if present
+        if (request.Content != null)
+        {
+            var contentBytes = await request.Content.ReadAsByteArrayAsync();
+            clone.Content = new ByteArrayContent(contentBytes);
+
+            // Copy content headers
+            foreach (var header in request.Content.Headers)
+            {
+                clone.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            }
+        }
+
+        return clone;
     }
 
     private static string? GetContinuationToken(JsonDocument responseDocument)
@@ -232,10 +322,10 @@ public class AzureResourceGraphService : IResourceGraphService
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
         request.Content = content;
 
-        var response = await _httpClient.SendAsync(request);
-        response.EnsureSuccessStatusCode();
-
+        var response = await SendRequestWithRetryAsync(request);
         var responseContent = await response.Content.ReadAsStringAsync();
+        response.Dispose();
+        
         return JsonDocument.Parse(responseContent);
     }
 
@@ -451,10 +541,10 @@ public class AzureResourceGraphService : IResourceGraphService
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
         request.Content = content;
 
-        var response = await _httpClient.SendAsync(request);
-        response.EnsureSuccessStatusCode();
-
+        var response = await SendRequestWithRetryAsync(request);
         var responseContent = await response.Content.ReadAsStringAsync();
+        response.Dispose();
+        
         return JsonDocument.Parse(responseContent);
     }
 
