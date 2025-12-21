@@ -492,7 +492,7 @@ public class GroupManagementService : IGroupManagementService
             {
                 foreach (var sp in spMembersPage.Value)
                 {
-                    var spType = sp.ServicePrincipalType == "ManagedIdentity" 
+                    var spType = string.Equals(sp.ServicePrincipalType, "ManagedIdentity", StringComparison.OrdinalIgnoreCase)
                         ? IdentityType.UserAssignedManagedIdentity 
                         : IdentityType.ServicePrincipal;
                     
@@ -532,7 +532,12 @@ public class GroupManagementService : IGroupManagementService
                 }
             }
 
-            _logger.LogInformation("Found {Count} members in group {GroupId}", members.Count, groupId);
+            var userCount = members.Count(m => m.Type == IdentityType.User);
+            var spCount = members.Count(m => m.Type == IdentityType.ServicePrincipal || m.Type == IdentityType.UserAssignedManagedIdentity);
+            var groupCount = members.Count(m => m.Type == IdentityType.Group);
+            
+            _logger.LogInformation("Found {TotalCount} members in group {GroupId}: {UserCount} users, {SpCount} service principals/managed identities, {GroupCount} groups", 
+                members.Count, groupId, userCount, spCount, groupCount);
         }
         catch (Exception ex)
         {

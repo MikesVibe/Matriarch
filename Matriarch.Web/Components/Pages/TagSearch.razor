@@ -1230,6 +1230,22 @@
         selectedGroup = group;
     }
 
+    private ManagedIdentityResourceDto ConvertIdentityToManagedIdentityResourceDto(AppIdentity identity)
+    {
+        return new ManagedIdentityResourceDto
+        {
+            SubscriptionId = identity.SubscriptionId ?? "",
+            ResourceGroup = identity.ResourceGroup ?? "",
+            ResourceId = $"/directoryObjects/{identity.ObjectId}",
+            ResourceName = identity.Name,
+            ResourceType = identity.Type.ToString(),
+            IdentityType = identity.Type.ToString(),
+            PrincipalId = identity.ObjectId,
+            TenantId = TenantContext.GetCurrentTenantSettings().TenantId,
+            ManagedIdentityResourceId = ""
+        };
+    }
+
     private async Task SearchByGroup()
     {
         if (selectedGroup == null)
@@ -1262,18 +1278,7 @@
             Logger.LogInformation("Found {Count} members in group {GroupName}", groupMembers.Count, selectedGroup.Name);
 
             // Convert members to ManagedIdentityResourceDto format
-            allManagedIdentities = groupMembers.Select(member => new ManagedIdentityResourceDto
-            {
-                SubscriptionId = member.SubscriptionId ?? "",
-                ResourceGroup = member.ResourceGroup ?? "",
-                ResourceId = $"/directoryObjects/{member.ObjectId}",
-                ResourceName = member.Name,
-                ResourceType = member.Type.ToString(),
-                IdentityType = member.Type.ToString(),
-                PrincipalId = member.ObjectId,
-                TenantId = TenantContext.GetCurrentTenantSettings().TenantId,
-                ManagedIdentityResourceId = ""
-            }).ToList();
+            allManagedIdentities = groupMembers.Select(ConvertIdentityToManagedIdentityResourceDto).ToList();
 
             totalIdentities = allManagedIdentities.Count;
             
@@ -1359,18 +1364,7 @@
             Logger.LogInformation("Analyzing {Count} selected identities", selectedIdentities.Count);
 
             // Convert selected identities to ManagedIdentityResourceDto format
-            allManagedIdentities = selectedIdentities.Select(identity => new ManagedIdentityResourceDto
-            {
-                SubscriptionId = identity.SubscriptionId ?? "",
-                ResourceGroup = identity.ResourceGroup ?? "",
-                ResourceId = $"/directoryObjects/{identity.ObjectId}",
-                ResourceName = identity.Name,
-                ResourceType = identity.Type.ToString(),
-                IdentityType = identity.Type.ToString(),
-                PrincipalId = identity.ObjectId,
-                TenantId = TenantContext.GetCurrentTenantSettings().TenantId,
-                ManagedIdentityResourceId = ""
-            }).ToList();
+            allManagedIdentities = selectedIdentities.Select(ConvertIdentityToManagedIdentityResourceDto).ToList();
 
             totalIdentities = allManagedIdentities.Count;
             
