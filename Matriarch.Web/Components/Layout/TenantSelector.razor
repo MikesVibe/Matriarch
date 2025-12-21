@@ -1,0 +1,32 @@
+@using Matriarch.Web.Services
+@inject ITenantContext TenantContext
+@rendermode InteractiveServer
+
+<div class="tenant-selector">
+    <label for="tenantDropdown" class="me-2">Tenant:</label>
+    <select id="tenantDropdown" class="form-select form-select-sm" @bind="selectedTenant" @bind:after="OnTenantChanged">
+        @foreach (var tenant in availableTenants)
+        {
+            <option value="@tenant">@tenant</option>
+        }
+    </select>
+</div>
+
+@code {
+    private List<string> availableTenants = new();
+    private string selectedTenant = string.Empty;
+
+    protected override void OnInitialized()
+    {
+        availableTenants = TenantContext.GetAvailableTenants();
+        selectedTenant = TenantContext.CurrentTenant ?? (availableTenants.Any() ? availableTenants.First() : string.Empty);
+    }
+
+    private void OnTenantChanged()
+    {
+        if (!string.IsNullOrEmpty(selectedTenant))
+        {
+            TenantContext.SetCurrentTenant(selectedTenant);
+        }
+    }
+}

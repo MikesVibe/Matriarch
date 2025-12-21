@@ -1,7 +1,5 @@
 ﻿@inherits LayoutComponentBase
 @using Matriarch.Web.Services
-@inject ITenantContext TenantContext
-@rendermode InteractiveServer
 
 <div class="page">
     <div class="sidebar">
@@ -10,15 +8,7 @@
 
     <main>
         <div class="top-row px-4">
-            <div class="tenant-selector">
-                <label for="tenantDropdown" class="me-2">Tenant:</label>
-                <select id="tenantDropdown" class="form-select form-select-sm" @bind="selectedTenant" @bind:after="OnTenantChanged">
-                    @foreach (var tenant in availableTenants)
-                    {
-                        <option value="@tenant">@tenant</option>
-                    }
-                </select>
-            </div>
+            <TenantSelector />
             <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
         </div>
 
@@ -33,22 +23,3 @@
     <a href="." class="reload">Reload</a>
     <span class="dismiss">🗙</span>
 </div>
-
-@code {
-    private List<string> availableTenants = new();
-    private string selectedTenant = string.Empty;
-
-    protected override void OnInitialized()
-    {
-        availableTenants = TenantContext.GetAvailableTenants();
-        selectedTenant = TenantContext.CurrentTenant ?? (availableTenants.Any() ? availableTenants.First() : string.Empty);
-    }
-
-    private void OnTenantChanged()
-    {
-        if (!string.IsNullOrEmpty(selectedTenant))
-        {
-            TenantContext.SetCurrentTenant(selectedTenant);
-        }
-    }
-}
