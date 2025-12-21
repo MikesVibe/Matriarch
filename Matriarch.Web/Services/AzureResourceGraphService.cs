@@ -15,9 +15,12 @@ namespace Matriarch.Web.Services;
 public class AzureResourceGraphService : IResourceGraphService
 {
     private readonly ILogger<AzureResourceGraphService> _logger;
-    private readonly TokenCredential _credential;
+    private readonly ITenantContext _tenantContext;
     private readonly HttpClient _httpClient;
     private readonly AppSettings _settings;
+    private readonly object _lock = new object();
+    private TokenCredential? _credential;
+    private string? _currentTenantId;
     private const string ResourceGraphApiEndpoint = "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01";
     
     // Global throttling state - shared across all instances and threads
@@ -27,18 +30,34 @@ public class AzureResourceGraphService : IResourceGraphService
 
     public AzureResourceGraphService(
         AppSettings settings,
+        ITenantContext tenantContext,
         ILogger<AzureResourceGraphService> logger,
         HttpClient httpClient)
     {
         _logger = logger;
         _httpClient = httpClient;
         _settings = settings;
+        _tenantContext = tenantContext;
+    }
 
-        // Use ClientSecretCredential for authentication
-        _credential = new ClientSecretCredential(
-            settings.Azure.TenantId,
-            settings.Azure.ClientId,
-            settings.Azure.ClientSecret);
+    private TokenCredential GetCredential()
+    {
+        var tenantSettings = _tenantContext.GetCurrentTenantSettings();
+        
+        lock (_lock)
+        {
+            // Recreate credential if tenant has changed
+            if (_credential == null || _currentTenantId != tenantSettings.TenantId)
+            {
+                _credential = new ClientSecretCredential(
+                    tenantSettings.TenantId,
+                    tenantSettings.ClientId,
+                    tenantSettings.ClientSecret);
+                _currentTenantId = tenantSettings.TenantId;
+            }
+
+            return _credential;
+        }
     }
 
     public async Task<List<AzureRoleAssignmentDto>> FetchRoleAssignmentsForPrincipalsAsync(List<string> principalIds)
@@ -97,7 +116,7 @@ public class AzureResourceGraphService : IResourceGraphService
     private async Task<AccessToken> GetAuthorizationTokenAsync()
     {
         var tokenRequestContext = new TokenRequestContext(["https://management.azure.com/.default"]);
-        var token = await _credential.GetTokenAsync(tokenRequestContext, default);
+        var token = await GetCredential().GetTokenAsync(tokenRequestContext, default);
         return token;
     }
 

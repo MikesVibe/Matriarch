@@ -2,7 +2,7 @@ namespace Matriarch.Web.Configuration;
 
 public class AppSettings
 {
-    public AzureSettings Azure { get; set; } = new();
+    public Dictionary<string, AzureSettings> Azure { get; set; } = new();
     public Neo4jSettings Neo4j { get; set; } = new();
     public CacheSettings Cache { get; set; } = new();
     public SqliteSettings Sqlite { get; set; } = new();

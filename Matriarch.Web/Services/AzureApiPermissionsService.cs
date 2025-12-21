@@ -10,24 +10,41 @@ namespace Matriarch.Web.Services;
 public class AzureApiPermissionsService : IApiPermissionsService
 {
     private readonly ILogger<AzureApiPermissionsService> _logger;
-    private readonly GraphServiceClient _graphClient;
+    private readonly ITenantContext _tenantContext;
+    private readonly object _lock = new object();
+    private GraphServiceClient? _graphClient;
+    private string? _currentTenantId;
     private const int MaxGraphPageSize = 999;
     private const string ApplicationPermissionType = "Application";
 
     public AzureApiPermissionsService(
-        AppSettings settings,
+        ITenantContext tenantContext,
         ILogger<AzureApiPermissionsService> logger)
     {
         _logger = logger;
+        _tenantContext = tenantContext;
+    }
 
-        // Use ClientSecretCredential for authentication
-        var credential = new ClientSecretCredential(
-            settings.Azure.TenantId,
-            settings.Azure.ClientId,
-            settings.Azure.ClientSecret);
+    private GraphServiceClient GetGraphClient()
+    {
+        var tenantSettings = _tenantContext.GetCurrentTenantSettings();
+        
+        lock (_lock)
+        {
+            // Recreate client if tenant has changed
+            if (_graphClient == null || _currentTenantId != tenantSettings.TenantId)
+            {
+                var credential = new ClientSecretCredential(
+                    tenantSettings.TenantId,
+                    tenantSettings.ClientId,
+                    tenantSettings.ClientSecret);
 
-        // Initialize Graph client for Entra ID operations
-        _graphClient = new GraphServiceClient(credential);
+                _graphClient = new GraphServiceClient(credential);
+                _currentTenantId = tenantSettings.TenantId;
+            }
+
+            return _graphClient;
+        }
     }
 
     public async Task<List<ApiPermission>> GetApiPermissionsAsync(Identity identity)
@@ -65,7 +82,7 @@ public class AzureApiPermissionsService : IApiPermissionsService
         try
         {
             // Get app role assignments for a service principal or managed identity
-            var appRoleAssignments = await _graphClient.ServicePrincipals[objectId]
+            var appRoleAssignments = await GetGraphClient().ServicePrincipals[objectId]
                 .AppRoleAssignments
                 .GetAsync(config =>
                 {
@@ -84,7 +101,7 @@ public class AzureApiPermissionsService : IApiPermissionsService
                     // Get the resource service principal to find the app role details
                     try
                     {
-                        var resourceSp = await _graphClient.ServicePrincipals[assignment.ResourceId.ToString()].GetAsync();
+                        var resourceSp = await GetGraphClient().ServicePrincipals[assignment.ResourceId.ToString()].GetAsync();
                         
                         if (resourceSp?.AppRoles != null)
                         {
@@ -132,7 +149,7 @@ public class AzureApiPermissionsService : IApiPermissionsService
         try
         {
             // Get OAuth2 permission grants (delegated permissions) for the user
-            var oauth2Grants = await _graphClient.Users[objectId]
+            var oauth2Grants = await GetGraphClient().Users[objectId]
                 .Oauth2PermissionGrants
                 .GetAsync(config =>
                 {
@@ -151,7 +168,7 @@ public class AzureApiPermissionsService : IApiPermissionsService
                     try
                     {
                         // Get the resource service principal to find permission details
-                        var resourceSp = await _graphClient.ServicePrincipals[grant.ResourceId].GetAsync();
+                        var resourceSp = await GetGraphClient().ServicePrincipals[grant.ResourceId].GetAsync();
                         
                         if (!string.IsNullOrEmpty(grant.Scope))
                         {
@@ -179,7 +196,7 @@ public class AzureApiPermissionsService : IApiPermissionsService
             }
 
             // Also get app role assignments for the user (if assigned to applications)
-            var userAppRoleAssignments = await _graphClient.Users[objectId]
+            var userAppRoleAssignments = await GetGraphClient().Users[objectId]
                 .AppRoleAssignments
                 .GetAsync(config =>
                 {
@@ -197,7 +214,7 @@ public class AzureApiPermissionsService : IApiPermissionsService
 
                     try
                     {
-                        var resourceSp = await _graphClient.ServicePrincipals[assignment.ResourceId.ToString()].GetAsync();
+                        var resourceSp = await GetGraphClient().ServicePrincipals[assignment.ResourceId.ToString()].GetAsync();
                         
                         if (resourceSp?.AppRoles != null)
                         {

@@ -17,21 +17,38 @@ public interface IIdentityService
 public class IdentityService : IIdentityService
 {
     private readonly ILogger<IdentityService> _logger;
-    private readonly GraphServiceClient _graphClient;
+    private readonly ITenantContext _tenantContext;
+    private readonly object _lock = new object();
+    private GraphServiceClient? _graphClient;
+    private string? _currentTenantId;
     private const int MaxGraphPageSize = 999;
 
-    public IdentityService(AppSettings settings, ILogger<IdentityService> logger)
+    public IdentityService(ITenantContext tenantContext, ILogger<IdentityService> logger)
     {
         _logger = logger;
+        _tenantContext = tenantContext;
+    }
 
-        // Use ClientSecretCredential for authentication
-        var credential = new ClientSecretCredential(
-            settings.Azure.TenantId,
-            settings.Azure.ClientId,
-            settings.Azure.ClientSecret);
+    private GraphServiceClient GetGraphClient()
+    {
+        var settings = _tenantContext.GetCurrentTenantSettings();
+        
+        lock (_lock)
+        {
+            // Recreate client if tenant has changed
+            if (_graphClient == null || _currentTenantId != settings.TenantId)
+            {
+                var credential = new ClientSecretCredential(
+                    settings.TenantId,
+                    settings.ClientId,
+                    settings.ClientSecret);
 
-        // Initialize Graph client for Entra ID operations
-        _graphClient = new GraphServiceClient(credential);
+                _graphClient = new GraphServiceClient(credential);
+                _currentTenantId = settings.TenantId;
+            }
+
+            return _graphClient;
+        }
     }
 
     public async Task<IdentitySearchResult> SearchIdentitiesAsync(string searchInput)
@@ -85,7 +102,7 @@ public class IdentityService : IIdentityService
         // Search for users
         try
         {
-            var users = await _graphClient.Users.GetAsync(config =>
+            var users = await GetGraphClient().Users.GetAsync(config =>
             {
                 config.QueryParameters.Filter = $"startswith(displayName, '{escapedInput}')";
                 config.QueryParameters.Top = 10; // Limit to 10 results
@@ -114,7 +131,7 @@ public class IdentityService : IIdentityService
         // Search for service principals
         try
         {
-            var sps = await _graphClient.ServicePrincipals.GetAsync(config =>
+            var sps = await GetGraphClient().ServicePrincipals.GetAsync(config =>
             {
                 config.QueryParameters.Filter = $"startswith(displayName, '{escapedInput}')";
                 config.QueryParameters.Top = 10; // Limit to 10 results
@@ -137,7 +154,7 @@ public class IdentityService : IIdentityService
         // Search for groups
         try
         {
-            var groups = await _graphClient.Groups.GetAsync(config =>
+            var groups = await GetGraphClient().Groups.GetAsync(config =>
             {
                 config.QueryParameters.Filter = $"startswith(displayName, '{escapedInput}') and securityEnabled eq true";
                 config.QueryParameters.Top = 10; // Limit to 10 results
@@ -183,7 +200,7 @@ public class IdentityService : IIdentityService
                     Types = new List<string> { "user", "servicePrincipal", "application", "group" }
                 };
 
-                var response = await _graphClient.DirectoryObjects.GetByIds.PostAsGetByIdsPostResponseAsync(getByIdsRequest);
+                var response = await GetGraphClient().DirectoryObjects.GetByIds.PostAsGetByIdsPostResponseAsync(getByIdsRequest);
                 var directoryObjects = response?.Value;
 
                 if (directoryObjects != null && directoryObjects.Count > 0)
@@ -216,7 +233,7 @@ public class IdentityService : IIdentityService
                         if (!string.IsNullOrEmpty(app.AppId))
                         {
                             var escapedAppId = EscapeODataFilterValue(app.AppId);
-                            var sps = await _graphClient.ServicePrincipals.GetAsync(config =>
+                            var sps = await GetGraphClient().ServicePrincipals.GetAsync(config =>
                             {
                                 config.QueryParameters.Filter = $"appId eq '{escapedAppId}'";
                                 config.QueryParameters.Top = 1;
@@ -268,7 +285,7 @@ public class IdentityService : IIdentityService
             try
             {
                 var escapedInput = EscapeODataFilterValue(identityInput);
-                var sps = await _graphClient.ServicePrincipals.GetAsync(config =>
+                var sps = await GetGraphClient().ServicePrincipals.GetAsync(config =>
                 {
                     config.QueryParameters.Filter = $"appId eq '{escapedInput}'";
                     config.QueryParameters.Top = 1;
@@ -292,7 +309,7 @@ public class IdentityService : IIdentityService
             try
             {
                 var escapedInput = EscapeODataFilterValue(identityInput);
-                var users = await _graphClient.Users.GetAsync(config =>
+                var users = await GetGraphClient().Users.GetAsync(config =>
                 {
                     config.QueryParameters.Filter = $"mail eq '{escapedInput}' or userPrincipalName eq '{escapedInput}'";
                     config.QueryParameters.Top = 1;
@@ -322,7 +339,7 @@ public class IdentityService : IIdentityService
             try
             {
                 var escapedInput = EscapeODataFilterValue(identityInput);
-                var users = await _graphClient.Users.GetAsync(config =>
+                var users = await GetGraphClient().Users.GetAsync(config =>
                 {
                     config.QueryParameters.Filter = $"startswith(displayName, '{escapedInput}')";
                     config.QueryParameters.Top = 1;
@@ -350,7 +367,7 @@ public class IdentityService : IIdentityService
             try
             {
                 var escapedInput = EscapeODataFilterValue(identityInput);
-                var sps = await _graphClient.ServicePrincipals.GetAsync(config =>
+                var sps = await GetGraphClient().ServicePrincipals.GetAsync(config =>
                 {
                     config.QueryParameters.Filter = $"startswith(displayName, '{escapedInput}')";
                     config.QueryParameters.Top = 1;
@@ -371,7 +388,7 @@ public class IdentityService : IIdentityService
             try
             {
                 var escapedInput = EscapeODataFilterValue(identityInput);
-                var groups = await _graphClient.Groups.GetAsync(config =>
+                var groups = await GetGraphClient().Groups.GetAsync(config =>
                 {
                     config.QueryParameters.Filter = $"startswith(displayName, '{escapedInput}') and securityEnabled eq true";
                     config.QueryParameters.Top = 1;
@@ -496,7 +513,7 @@ public class IdentityService : IIdentityService
         try
         {
             var escapedAppId = EscapeODataFilterValue(appId);
-            var apps = await _graphClient.Applications.GetAsync(config =>
+            var apps = await GetGraphClient().Applications.GetAsync(config =>
             {
                 config.QueryParameters.Filter = $"appId eq '{escapedAppId}'";
                 config.QueryParameters.Top = 1;

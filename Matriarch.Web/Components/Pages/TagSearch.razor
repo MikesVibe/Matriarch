@@ -14,6 +14,7 @@
 @inject IJSRuntime JSRuntime
 @inject ILogger<TagSearch> Logger
 @inject Matriarch.Web.Configuration.AppSettings AppSettings
+@inject ITenantContext TenantContext
 @rendermode InteractiveServer
 
 <PageTitle>Tag Search</PageTitle>
@@ -607,11 +608,12 @@
         
         try
         {
-            // Create Graph client
+            // Create Graph client with current tenant settings
+            var tenantSettings = TenantContext.GetCurrentTenantSettings();
             var credential = new ClientSecretCredential(
-                AppSettings.Azure.TenantId,
-                AppSettings.Azure.ClientId,
-                AppSettings.Azure.ClientSecret);
+                tenantSettings.TenantId,
+                tenantSettings.ClientId,
+                tenantSettings.ClientSecret);
             var graphClient = new GraphServiceClient(credential);
 
             // Construct the tag we're looking for: "backstage-owner-ref:tagValue"
@@ -736,7 +738,7 @@
                     ResourceType = "Microsoft.Graph/servicePrincipals",
                     IdentityType = "ServicePrincipal",
                     PrincipalId = sp.Id ?? "",
-                    TenantId = AppSettings.Azure.TenantId,
+                    TenantId = TenantContext.GetCurrentTenantSettings().TenantId,
                     ManagedIdentityResourceId = ""
                 });
             }

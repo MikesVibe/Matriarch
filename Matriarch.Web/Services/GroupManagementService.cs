@@ -39,29 +39,46 @@ public class AzureRoleAssignmentDto
 public class GroupManagementService : IGroupManagementService
 {
     private readonly ILogger<GroupManagementService> _logger;
-    private readonly GraphServiceClient _graphClient;
+    private readonly ITenantContext _tenantContext;
+    private readonly object _lock = new object();
+    private GraphServiceClient? _graphClient;
+    private string? _currentTenantId;
     private readonly AppSettings _settings;
     private readonly SemaphoreSlim _transitiveGroupSemaphore;
     private const int MaxGraphPageSize = 999;
 
-    public GroupManagementService(AppSettings settings, ILogger<GroupManagementService> logger)
+    public GroupManagementService(AppSettings settings, ITenantContext tenantContext, ILogger<GroupManagementService> logger)
     {
         _logger = logger;
         _settings = settings;
-
-        // Use ClientSecretCredential for authentication
-        var credential = new ClientSecretCredential(
-            settings.Azure.TenantId,
-            settings.Azure.ClientId,
-            settings.Azure.ClientSecret);
-
-        // Initialize Graph client for Entra ID operations
-        _graphClient = new GraphServiceClient(credential);
+        _tenantContext = tenantContext;
         
         // Initialize semaphore for rate limiting transitive group requests
         _transitiveGroupSemaphore = new SemaphoreSlim(
             settings.Parallelization.MaxConcurrentTransitiveGroupRequests,
             settings.Parallelization.MaxConcurrentTransitiveGroupRequests);
+    }
+
+    private GraphServiceClient GetGraphClient()
+    {
+        var tenantSettings = _tenantContext.GetCurrentTenantSettings();
+        
+        lock (_lock)
+        {
+            // Recreate client if tenant has changed
+            if (_graphClient == null || _currentTenantId != tenantSettings.TenantId)
+            {
+                var credential = new ClientSecretCredential(
+                    tenantSettings.TenantId,
+                    tenantSettings.ClientId,
+                    tenantSettings.ClientSecret);
+
+                _graphClient = new GraphServiceClient(credential);
+                _currentTenantId = tenantSettings.TenantId;
+            }
+
+            return _graphClient;
+        }
     }
 
     public async Task<List<SecurityGroup>> GetGroupMembershipsAsync(Models.Identity identity)
@@ -72,13 +89,13 @@ public class GroupManagementService : IGroupManagementService
         {
             DirectoryObjectCollectionResponse? memberOfPage = identity.Type switch
             {
-                IdentityType.User => await _graphClient.Users[identity.ObjectId].MemberOf.GetAsync(config =>
+                IdentityType.User => await GetGraphClient().Users[identity.ObjectId].MemberOf.GetAsync(config =>
                 {
                     config.QueryParameters.Top = MaxGraphPageSize;
                 }),
                 IdentityType.ServicePrincipal or 
                 IdentityType.UserAssignedManagedIdentity or 
-                IdentityType.SystemAssignedManagedIdentity => await _graphClient.ServicePrincipals[identity.ObjectId].MemberOf.GetAsync(config =>
+                IdentityType.SystemAssignedManagedIdentity => await GetGraphClient().ServicePrincipals[identity.ObjectId].MemberOf.GetAsync(config =>
                 {
                     config.QueryParameters.Top = MaxGraphPageSize;
                 }),
@@ -110,7 +127,7 @@ public class GroupManagementService : IGroupManagementService
     private async Task<DirectoryObjectCollectionResponse?> HandleGroupIdentityAsync(string groupId, List<SecurityGroup> groups)
     {
         // For a group identity, verify it exists and is a security group
-        var group = await _graphClient.Groups[groupId].GetAsync();
+        var group = await GetGraphClient().Groups[groupId].GetAsync();
         if (group != null && group.SecurityEnabled == true)
         {
             // For a group, we treat it as being "member" of itself for role assignment purposes
@@ -151,7 +168,7 @@ public class GroupManagementService : IGroupManagementService
             {
                 _logger.LogDebug("Fetching transitive members for group {GroupId}", group.Id);
                 
-                var transitiveMemberOfPage = await _graphClient.Groups[group.Id].TransitiveMemberOf.GetAsync(config =>
+                var transitiveMemberOfPage = await GetGraphClient().Groups[group.Id].TransitiveMemberOf.GetAsync(config =>
                 {
                     config.QueryParameters.Top = MaxGraphPageSize;
                 });
@@ -244,7 +261,7 @@ public class GroupManagementService : IGroupManagementService
             _logger.LogDebug("Fetching transitive members for group {GroupId}", groupId);
             
             // Use TransitiveMemberOf to get all parent groups (direct and indirect)
-            var transitiveMemberOfPage = await _graphClient.Groups[groupId].TransitiveMemberOf.GetAsync(config =>
+            var transitiveMemberOfPage = await GetGraphClient().Groups[groupId].TransitiveMemberOf.GetAsync(config =>
             {
                 config.QueryParameters.Top = MaxGraphPageSize;
             });
@@ -294,10 +311,10 @@ public class GroupManagementService : IGroupManagementService
             try
             {
                 // Get group details
-                var group = await _graphClient.Groups[groupId].GetAsync();
+                var group = await GetGraphClient().Groups[groupId].GetAsync();
                 
                 // Use TransitiveMemberOf to get all parent groups (direct and indirect) in one call
-                var transitiveMemberOfPage = await _graphClient.Groups[groupId].TransitiveMemberOf.GetAsync(config =>
+                var transitiveMemberOfPage = await GetGraphClient().Groups[groupId].TransitiveMemberOf.GetAsync(config =>
                 {
                     config.QueryParameters.Top = MaxGraphPageSize;
                 });
@@ -305,7 +322,7 @@ public class GroupManagementService : IGroupManagementService
                 var directParentGroupIds = new List<string>();
                 
                 // First, get direct parent groups using MemberOf
-                var memberOfPage = await _graphClient.Groups[groupId].MemberOf.GetAsync(config =>
+                var memberOfPage = await GetGraphClient().Groups[groupId].MemberOf.GetAsync(config =>
                 {
                     config.QueryParameters.Top = MaxGraphPageSize;
                 });
@@ -359,8 +376,8 @@ public class GroupManagementService : IGroupManagementService
 
             try
             {
-                var group = await _graphClient.Groups[parentGroupId].GetAsync();
-                var memberOfPage = await _graphClient.Groups[parentGroupId].MemberOf.GetAsync(config =>
+                var group = await GetGraphClient().Groups[parentGroupId].GetAsync();
+                var memberOfPage = await GetGraphClient().Groups[parentGroupId].MemberOf.GetAsync(config =>
                 {
                     config.QueryParameters.Top = MaxGraphPageSize;
                 });
