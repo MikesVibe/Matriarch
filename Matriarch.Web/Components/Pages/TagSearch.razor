@@ -1,0 +1,1063 @@
+@page "/tagsearch"
+@using Matriarch.Web.Models
+@using Matriarch.Web.Services
+@using Microsoft.Graph.Beta
+@using Microsoft.Graph.Beta.Models
+@using Microsoft.Kiota.Abstractions
+@using Azure.Identity
+@using GraphRoleAssignment = Microsoft.Graph.Beta.Models.RoleAssignment
+@using AppRoleAssignment = Matriarch.Web.Models.RoleAssignment
+@using AppIdentity = Matriarch.Web.Models.Identity
+@inject IResourceGraphService _resourceGraphService
+@inject IRoleAssignmentService _roleAssignmentService
+@inject IExcelExportService _excelExportService
+@inject IJSRuntime JSRuntime
+@inject ILogger<TagSearch> Logger
+@inject Matriarch.Web.Configuration.AppSettings AppSettings
+@rendermode InteractiveServer
+
+<PageTitle>Tag Search</PageTitle>
+
+<h1>Tag-Based Identity Search</h1>
+
+<div class="row mb-4">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header">
+                <h5>Search Configuration</h5>
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label for="searchType" class="form-label">Search Type:</label>
+                        <select class="form-select" id="searchType" @bind="selectedSearchType">
+                            <option value="Tag">Tag</option>
+                            <option value="Group">Group</option>
+                            <option value="IdentitySelector">Identity Selector</option>
+                        </select>
+                    </div>
+                </div>
+
+                @if (selectedSearchType == "Tag")
+                {
+                    <div class="row g-3 mt-2">
+                        <div class="col-md-12">
+                            <label for="tagInput" class="form-label">Tag Value:</label>
+                            <input type="text" class="form-control" id="tagInput" @bind="tagValue" placeholder="e.g., ptci-1567" />
+                            <div class="form-text">Enter the tag value to search for resources with the 'backstage-owner-ref' tag.</div>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-3">
+                        <button class="btn btn-primary" @onclick="SearchByTag" disabled="@isLoading">
+                            @if (isLoading)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                                <span>Searching...</span>
+                            }
+                            else
+                            {
+                                <span>Search</span>
+                            }
+                        </button>
+                    </div>
+                }
+                else
+                {
+                    <div class="alert alert-info mt-3" role="alert">
+                        <i class="bi bi-info-circle me-2"></i>
+                        This search type is not yet implemented. Please select "Tag" to search by tag.
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <div class="alert alert-danger alert-dismissible fade show" role="alert">
+                <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                <strong>Error:</strong> @errorMessage
+                <button type="button" class="btn-close" @onclick="@(() => errorMessage = null)" aria-label="Close"></button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (identityResults.Any())
+{
+    <div class="row mb-4">
+        <div class="col-md-12">
+            <div class="alert alert-success" role="alert">
+                <i class="bi bi-check-circle me-2"></i>
+                Found <strong>@totalIdentities</strong> identities matching the tag. Showing <strong>@((currentPage - 1) * pageSize + 1)</strong> to <strong>@Math.Min(currentPage * pageSize, totalIdentities)</strong>.
+            </div>
+        </div>
+    </div>
+
+    @if (totalPages > 1)
+    {
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <nav aria-label="Page navigation">
+                    <ul class="pagination justify-content-center">
+                        <li class="page-item @(currentPage == 1 ? "disabled" : "")">
+                            <button class="page-link" @onclick="GoToPreviousPage" disabled="@(currentPage == 1)">
+                                <i class="bi bi-chevron-left"></i> Previous
+                            </button>
+                        </li>
+                        
+                        @for (int i = Math.Max(1, currentPage - 2); i <= Math.Min(totalPages, currentPage + 2); i++)
+                        {
+                            var pageNum = i; // Capture for lambda
+                            <li class="page-item @(currentPage == pageNum ? "active" : "")">
+                                <button class="page-link" @onclick="@(() => GoToPage(pageNum))">@pageNum</button>
+                            </li>
+                        }
+                        
+                        <li class="page-item @(currentPage == totalPages ? "disabled" : "")">
+                            <button class="page-link" @onclick="GoToNextPage" disabled="@(currentPage == totalPages)">
+                                Next <i class="bi bi-chevron-right"></i>
+                            </button>
+                        </li>
+                    </ul>
+                </nav>
+                <div class="text-center text-muted">
+                    Page @currentPage of @totalPages
+                </div>
+            </div>
+        </div>
+    }
+
+    @if (allDataLoaded)
+    {
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <button class="btn btn-success btn-lg" @onclick="DownloadExcel">
+                    <i class="bi bi-download me-2"></i>
+                    Download All Results as Excel
+                </button>
+            </div>
+        </div>
+    }
+
+    @foreach (var identityResult in identityResults)
+    {
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <div class="card">
+                    <div class="card-header bg-info text-white" style="cursor: pointer;" @onclick="@(() => ToggleCollapse(identityResult.Identity.PrincipalId))">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h5 class="mb-0">
+                                <i class="bi @(collapsedIdentities.Contains(identityResult.Identity.PrincipalId) ? "bi-chevron-right" : "bi-chevron-down") me-2"></i>
+                                @identityResult.Identity.ResourceName (@identityResult.Identity.IdentityType)
+                            </h5>
+                            <span class="badge bg-light text-dark">@identityResult.DirectRoleAssignments.Count direct role assignments</span>
+                        </div>
+                    </div>
+                    
+                    @if (!collapsedIdentities.Contains(identityResult.Identity.PrincipalId))
+                    {
+                        <div class="card-body">
+                            <h6>Identity Summary</h6>
+                            <dl class="row mb-4">
+                                <dt class="col-sm-3">Principal ID:</dt>
+                                <dd class="col-sm-9"><code>@identityResult.Identity.PrincipalId</code></dd>
+
+                                <dt class="col-sm-3">Resource Type:</dt>
+                                <dd class="col-sm-9">@identityResult.Identity.ResourceType</dd>
+
+                                <dt class="col-sm-3">Resource Group:</dt>
+                                <dd class="col-sm-9">@identityResult.Identity.ResourceGroup</dd>
+
+                                <dt class="col-sm-3">Subscription ID:</dt>
+                                <dd class="col-sm-9"><code>@identityResult.Identity.SubscriptionId</code></dd>
+
+                                @if (!string.IsNullOrEmpty(identityResult.Identity.ManagedIdentityResourceId))
+                                {
+                                    <dt class="col-sm-3">Managed Identity Resource ID:</dt>
+                                    <dd class="col-sm-9"><code>@identityResult.Identity.ManagedIdentityResourceId</code></dd>
+                                }
+                            </dl>
+
+                            <h6 class="mt-4">Direct Role Assignments</h6>
+                            @if (identityResult.IsLoadingRoleAssignments)
+                            {
+                                <div class="text-center py-3">
+                                    <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                    <span class="text-muted ms-2">Loading...</span>
+                                </div>
+                            }
+                            else if (identityResult.DirectRoleAssignments.Any())
+                            {
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-striped table-hover">
+                                        <thead>
+                                            <tr>
+                                                <th>Role Name</th>
+                                                <th>Scope</th>
+                                                <th>Assigned To</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var ra in identityResult.DirectRoleAssignments)
+                                            {
+                                                <tr>
+                                                    <td><strong>@ra.RoleName</strong></td>
+                                                    <td><code class="text-muted">@ra.Scope</code></td>
+                                                    <td><span class="badge bg-primary">@ra.AssignedTo</span></td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                            else
+                            {
+                                <p class="text-muted">No direct role assignments found.</p>
+                            }
+
+                            <h6 class="mt-4">Direct Group Memberships</h6>
+                            @if (identityResult.IsLoadingDirectGroups)
+                            {
+                                <div class="text-center py-3">
+                                    <div class="spinner-border spinner-border-sm text-primary" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                    <span class="text-muted ms-2">Loading...</span>
+                                </div>
+                            }
+                            else if (identityResult.SecurityDirectGroups.Any())
+                            {
+                                <ul class="list-group">
+                                    @foreach (var group in identityResult.SecurityDirectGroups)
+                                    {
+                                        <li class="list-group-item">
+                                            <strong>@group.DisplayName</strong>
+                                            @if (!string.IsNullOrEmpty(group.Description))
+                                            {
+                                                <br />
+                                                <small class="text-muted">@group.Description</small>
+                                            }
+                                        </li>
+                                    }
+                                </ul>
+                            }
+                            else
+                            {
+                                <p class="text-muted">Not a direct member of any security groups.</p>
+                            }
+
+                            <h6 class="mt-4">Indirect Group Memberships (via parent groups)</h6>
+                            @if (identityResult.IsLoadingIndirectGroups)
+                            {
+                                <div class="text-center py-3">
+                                    <div class="spinner-border spinner-border-sm text-secondary" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                    <span class="text-muted ms-2">Loading...</span>
+                                </div>
+                            }
+                            else if (identityResult.SecurityIndirectGroups.Any())
+                            {
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-striped table-hover">
+                                        <thead>
+                                            <tr>
+                                                <th>Group Name</th>
+                                                <th>Description</th>
+                                                <th>Child Group</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var group in identityResult.SecurityIndirectGroups)
+                                            {
+                                                <tr>
+                                                    <td><strong>@group.DisplayName</strong></td>
+                                                    <td>
+                                                        @if (!string.IsNullOrEmpty(group.Description))
+                                                        {
+                                                            <small class="text-muted">@group.Description</small>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="text-muted">-</span>
+                                                        }
+                                                    </td>
+                                                    <td>
+                                                        @if (group.ChildGroup != null)
+                                                        {
+                                                            <span class="badge bg-info">@group.ChildGroup.DisplayName</span>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="text-muted">-</span>
+                                                        }
+                                                    </td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                            else
+                            {
+                                <p class="text-muted">No indirect group memberships.</p>
+                            }
+
+                            <h6 class="mt-4">All Role Assignments (from all groups)</h6>
+                            @if (identityResult.IsLoadingGroupRoleAssignments)
+                            {
+                                <div class="text-center py-3">
+                                    <div class="spinner-border spinner-border-sm text-warning" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                    <span class="text-muted ms-2">Loading...</span>
+                                </div>
+                            }
+                            else
+                            {
+                                var allGroupRoleAssignments = GetAllRoleAssignmentsForIdentity(identityResult);
+                                if (allGroupRoleAssignments.Any())
+                                {
+                                    <div class="table-responsive">
+                                        <table class="table table-sm table-striped table-hover">
+                                            <thead>
+                                                <tr>
+                                                    <th>Role Name</th>
+                                                    <th>Scope</th>
+                                                    <th>Source</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                @foreach (var ra in allGroupRoleAssignments)
+                                                {
+                                                    <tr>
+                                                        <td><strong>@ra.RoleName</strong></td>
+                                                        <td><code class="text-muted">@ra.Scope</code></td>
+                                                        <td><span class="badge bg-info">@ra.AssignedTo</span></td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <p class="text-muted">No role assignments from group memberships.</p>
+                                }
+                            }
+
+                            <h6 class="mt-4">API Permissions</h6>
+                            @if (identityResult.IsLoadingApiPermissions)
+                            {
+                                <div class="text-center py-3">
+                                    <div class="spinner-border spinner-border-sm text-dark" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                    <span class="text-muted ms-2">Loading...</span>
+                                </div>
+                            }
+                            else if (identityResult.ApiPermissions.Any())
+                            {
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-striped table-hover">
+                                        <thead>
+                                            <tr>
+                                                <th>Resource</th>
+                                                <th>Permission</th>
+                                                <th>Type</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var permission in identityResult.ApiPermissions)
+                                            {
+                                                <tr>
+                                                    <td><strong>@permission.ResourceDisplayName</strong></td>
+                                                    <td><code>@permission.PermissionValue</code></td>
+                                                    <td><span class="badge bg-secondary">@permission.PermissionType</span></td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                            else
+                            {
+                                <p class="text-muted">No API permissions found.</p>
+                            }
+
+                            <h6 class="mt-4">Key Vault Access Policies</h6>
+                            @if (identityResult.IsLoadingKeyVaultPolicies)
+                            {
+                                <div class="text-center py-3">
+                                    <div class="spinner-border spinner-border-sm text-info" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                    <span class="text-muted ms-2">Loading...</span>
+                                </div>
+                            }
+                            else if (identityResult.KeyVaultAccessPolicies.Any())
+                            {
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-striped table-hover">
+                                        <thead>
+                                            <tr>
+                                                <th>Key Vault</th>
+                                                <th>Assigned To</th>
+                                                <th>Key Permissions</th>
+                                                <th>Secret Permissions</th>
+                                                <th>Certificate Permissions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @foreach (var policy in identityResult.KeyVaultAccessPolicies)
+                                            {
+                                                <tr>
+                                                    <td>
+                                                        <strong>@policy.KeyVaultName</strong>
+                                                        <br />
+                                                        <small class="text-muted"><code>@policy.KeyVaultId</code></small>
+                                                    </td>
+                                                    <td><span class="badge bg-info">@policy.AssignedTo</span></td>
+                                                    <td>
+                                                        @if (policy.KeyPermissions.Any())
+                                                        {
+                                                            <span>@string.Join(", ", policy.KeyPermissions)</span>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="text-muted">None</span>
+                                                        }
+                                                    </td>
+                                                    <td>
+                                                        @if (policy.SecretPermissions.Any())
+                                                        {
+                                                            <span>@string.Join(", ", policy.SecretPermissions)</span>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="text-muted">None</span>
+                                                        }
+                                                    </td>
+                                                    <td>
+                                                        @if (policy.CertificatePermissions.Any())
+                                                        {
+                                                            <span>@string.Join(", ", policy.CertificatePermissions)</span>
+                                                        }
+                                                        else
+                                                        {
+                                                            <span class="text-muted">None</span>
+                                                        }
+                                                    </td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                </div>
+                            }
+                            else
+                            {
+                                <p class="text-muted">No Key Vault access policies found for this identity or its groups.</p>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+
+    @if (totalPages > 1)
+    {
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <nav aria-label="Page navigation">
+                    <ul class="pagination justify-content-center">
+                        <li class="page-item @(currentPage == 1 ? "disabled" : "")">
+                            <button class="page-link" @onclick="GoToPreviousPage" disabled="@(currentPage == 1)">
+                                <i class="bi bi-chevron-left"></i> Previous
+                            </button>
+                        </li>
+                        
+                        @for (int i = Math.Max(1, currentPage - 2); i <= Math.Min(totalPages, currentPage + 2); i++)
+                        {
+                            var pageNum = i; // Capture for lambda
+                            <li class="page-item @(currentPage == pageNum ? "active" : "")">
+                                <button class="page-link" @onclick="@(() => GoToPage(pageNum))">@pageNum</button>
+                            </li>
+                        }
+                        
+                        <li class="page-item @(currentPage == totalPages ? "disabled" : "")">
+                            <button class="page-link" @onclick="GoToNextPage" disabled="@(currentPage == totalPages)">
+                                Next <i class="bi bi-chevron-right"></i>
+                            </button>
+                        </li>
+                    </ul>
+                </nav>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private string selectedSearchType = "Tag";
+    private string tagValue = "";
+    private bool isLoading = false;
+    private string? errorMessage;
+    private List<IdentityResultWithRoles> identityResults = new();
+    private List<ManagedIdentityResourceDto> allManagedIdentities = new();
+    private HashSet<string> collapsedIdentities = new();
+    private bool allDataLoaded = false;
+    
+    // Paging variables
+    private int currentPage = 1;
+    private const int pageSize = 50;
+    private int totalIdentities = 0;
+    private int totalPages => (int)Math.Ceiling((double)totalIdentities / pageSize);
+
+    private class IdentityResultWithRoles
+    {
+        public ManagedIdentityResourceDto Identity { get; set; } = new();
+        public List<AppRoleAssignment> DirectRoleAssignments { get; set; } = new();
+        public List<SecurityGroup> SecurityDirectGroups { get; set; } = new();
+        public List<SecurityGroup> SecurityIndirectGroups { get; set; } = new();
+        public List<ApiPermission> ApiPermissions { get; set; } = new();
+        public List<KeyVaultAccessPolicy> KeyVaultAccessPolicies { get; set; } = new();
+        
+        // Loading states
+        public bool IsLoadingRoleAssignments { get; set; } = false;
+        public bool IsLoadingDirectGroups { get; set; } = false;
+        public bool IsLoadingIndirectGroups { get; set; } = false;
+        public bool IsLoadingGroupRoleAssignments { get; set; } = false;
+        public bool IsLoadingApiPermissions { get; set; } = false;
+        public bool IsLoadingKeyVaultPolicies { get; set; } = false;
+    }
+
+    private async Task SearchByTag()
+    {
+        if (string.IsNullOrWhiteSpace(tagValue))
+        {
+            errorMessage = "Please enter a tag value.";
+            return;
+        }
+
+        isLoading = true;
+        errorMessage = null;
+        identityResults.Clear();
+        collapsedIdentities.Clear();
+        allDataLoaded = false;
+        currentPage = 1;
+
+        try
+        {
+            // Fetch all managed identities by tag from Azure Resource Graph
+            var managedIdentitiesFromAzure = await _resourceGraphService.FetchManagedIdentitiesByTagAsync(tagValue);
+
+            // Fetch App Registrations/Service Principals with matching tags from Microsoft Graph
+            var servicePrincipalsWithTag = await FetchServicePrincipalsByTagAsync(tagValue);
+            
+            // Combine both lists
+            var allIdentities = managedIdentitiesFromAzure.Concat(servicePrincipalsWithTag).ToList();
+
+            // Deduplicate by PrincipalId (ObjectId) - keep only first occurrence of each unique ObjectId
+            // This prevents fetching data multiple times for the same identity
+            allManagedIdentities = allIdentities
+                .GroupBy(mi => mi.PrincipalId)
+                .Select(g => g.First())
+                .ToList();
+
+            if (!allManagedIdentities.Any())
+            {
+                errorMessage = $"No identities found with tag value '{tagValue}'.";
+                totalIdentities = 0;
+                return;
+            }
+
+            var duplicateCount = allIdentities.Count - allManagedIdentities.Count;
+            if (duplicateCount > 0)
+            {
+                Logger.LogInformation("Deduplicated {DuplicateCount} identities with same ObjectId", duplicateCount);
+            }
+
+            totalIdentities = allManagedIdentities.Count;
+            
+            // Load first page
+            await LoadPage(1);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"An error occurred while searching: {ex.Message}";
+            Logger.LogError(ex, "Error searching for identities with tag {TagValue}", tagValue);
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task<List<ManagedIdentityResourceDto>> FetchServicePrincipalsByTagAsync(string tagValue)
+    {
+        var results = new List<ManagedIdentityResourceDto>();
+        
+        try
+        {
+            // Create Graph client
+            var credential = new ClientSecretCredential(
+                AppSettings.Azure.TenantId,
+                AppSettings.Azure.ClientId,
+                AppSettings.Azure.ClientSecret);
+            var graphClient = new GraphServiceClient(credential);
+
+            // Construct the tag we're looking for: "backstage-owner-ref:tagValue"
+            var searchTag = $"backstage-owner-ref:{tagValue}";
+            
+            Logger.LogInformation("Searching for service principals and applications with tag: {SearchTag}", searchTag);
+
+            // First, query service principals with tags containing our search string
+            // Note: Microsoft Graph API doesn't support filtering by tags array contains,
+            // so we need to fetch and filter
+            // Important: Use ConsistencyLevel=eventual to get all tags, including for cross-tenant apps
+            var allServicePrincipals = new List<ServicePrincipal>();
+            var servicePrincipalsResponse = await graphClient.ServicePrincipals
+                .GetAsync(requestConfiguration =>
+                {
+                    requestConfiguration.QueryParameters.Select = new[] { "id", "appId", "displayName", "tags" };
+                    requestConfiguration.QueryParameters.Top = 999;
+                    requestConfiguration.QueryParameters.Count = true;
+                    requestConfiguration.Headers.Add("ConsistencyLevel", "eventual");
+                });
+
+            // Collect all pages
+            while (servicePrincipalsResponse != null)
+            {
+                if (servicePrincipalsResponse.Value != null)
+                {
+                    allServicePrincipals.AddRange(servicePrincipalsResponse.Value);
+                }
+                
+                // Check if there's a next page
+                if (!string.IsNullOrEmpty(servicePrincipalsResponse.OdataNextLink))
+                {
+                    // Get next page - simpler approach using the next link
+                    servicePrincipalsResponse = await graphClient.ServicePrincipals
+                        .WithUrl(servicePrincipalsResponse.OdataNextLink)
+                        .GetAsync();
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            // Filter service principals that have the matching tag in their tags array
+            var matchingServicePrincipals = allServicePrincipals
+                .Where(sp => sp.Tags != null && sp.Tags.Any(tag => tag.Equals(searchTag, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+
+            Logger.LogInformation("Found {Count} service principals with tag {SearchTag} in tags array", 
+                matchingServicePrincipals.Count, searchTag);
+
+            // Additionally, query applications to check serviceManagementReference property
+            // Note: ServiceManagementReference is a property on Application, not ServicePrincipal
+            // Use ConsistencyLevel=eventual for complete results
+            var allApplications = new List<Application>();
+            var applicationsResponse = await graphClient.Applications
+                .GetAsync(requestConfiguration =>
+                {
+                    requestConfiguration.QueryParameters.Select = new[] { "id", "appId", "displayName", "serviceManagementReference" };
+                    requestConfiguration.QueryParameters.Top = 999;
+                    requestConfiguration.QueryParameters.Count = true;
+                    requestConfiguration.Headers.Add("ConsistencyLevel", "eventual");
+                });
+
+            // Collect all pages
+            while (applicationsResponse != null)
+            {
+                if (applicationsResponse.Value != null)
+                {
+                    allApplications.AddRange(applicationsResponse.Value);
+                }
+                
+                // Check if there's a next page
+                if (!string.IsNullOrEmpty(applicationsResponse.OdataNextLink))
+                {
+                    applicationsResponse = await graphClient.Applications
+                        .WithUrl(applicationsResponse.OdataNextLink)
+                        .GetAsync();
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            // Filter applications by serviceManagementReference
+            var matchingApplications = allApplications
+                .Where(app => !string.IsNullOrEmpty(app.ServiceManagementReference) && 
+                             app.ServiceManagementReference.Equals(tagValue, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            Logger.LogInformation("Found {Count} applications with serviceManagementReference {TagValue}", 
+                matchingApplications.Count, tagValue);
+
+            // For matching applications, we need to find their corresponding service principals
+            foreach (var app in matchingApplications)
+            {
+                // Check if we already have this service principal in our list (by AppId)
+                if (!matchingServicePrincipals.Any(sp => sp.AppId == app.AppId))
+                {
+                    // Find the service principal for this application
+                    var spForApp = allServicePrincipals.FirstOrDefault(sp => sp.AppId == app.AppId);
+                    if (spForApp != null)
+                    {
+                        matchingServicePrincipals.Add(spForApp);
+                    }
+                }
+            }
+
+            Logger.LogInformation("Total {Count} unique service principals found (tags array + serviceManagementReference)", 
+                matchingServicePrincipals.Count);
+
+            // Convert to ManagedIdentityResourceDto format
+            foreach (var sp in matchingServicePrincipals)
+            {
+                results.Add(new ManagedIdentityResourceDto
+                {
+                    SubscriptionId = "", // Service principals are tenant-level, not subscription-specific
+                    ResourceGroup = "", // Service principals don't belong to resource groups
+                    ResourceId = $"/servicePrincipals/{sp.Id}",
+                    ResourceName = sp.DisplayName ?? sp.AppId ?? sp.Id ?? "Unknown",
+                    ResourceType = "Microsoft.Graph/servicePrincipals",
+                    IdentityType = "ServicePrincipal",
+                    PrincipalId = sp.Id ?? "",
+                    TenantId = AppSettings.Azure.TenantId,
+                    ManagedIdentityResourceId = ""
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error fetching service principals with tag {TagValue}", tagValue);
+            // Don't throw - just log and return empty list so managed identities can still be shown
+        }
+
+        return results;
+    }
+
+    private async Task LoadPage(int pageNumber)
+    {
+        currentPage = pageNumber;
+        identityResults.Clear();
+        collapsedIdentities.Clear();
+        allDataLoaded = false;
+        
+        // Calculate which identities to show on this page
+        var skip = (pageNumber - 1) * pageSize;
+        var pagedIdentities = allManagedIdentities.Skip(skip).Take(pageSize).ToList();
+
+        // Initialize results with identities for current page only
+        identityResults = pagedIdentities.Select(mi => new IdentityResultWithRoles
+            {
+                Identity = mi,
+                DirectRoleAssignments = new List<AppRoleAssignment>(),
+                SecurityDirectGroups = new List<SecurityGroup>(),
+                SecurityIndirectGroups = new List<SecurityGroup>(),
+                ApiPermissions = new List<ApiPermission>(),
+                KeyVaultAccessPolicies = new List<KeyVaultAccessPolicy>(),
+                IsLoadingRoleAssignments = true,
+                IsLoadingDirectGroups = true,
+                IsLoadingIndirectGroups = true,
+                IsLoadingGroupRoleAssignments = true,
+                IsLoadingApiPermissions = true,
+                IsLoadingKeyVaultPolicies = true
+            }).ToList();
+
+            StateHasChanged(); // Show the identities first
+
+            // Process each identity sequentially (one by one)
+            foreach (var identityResult in identityResults)
+            {
+                // Create an Identity object from the ManagedIdentityResourceDto
+                var identity = new AppIdentity
+                {
+                    ObjectId = identityResult.Identity.PrincipalId,
+                    Name = identityResult.Identity.ResourceName,
+                    Type = identityResult.Identity.IdentityType == "SystemAssigned" 
+                        ? IdentityType.SystemAssignedManagedIdentity 
+                        : (identityResult.Identity.IdentityType == "UserAssigned"
+                            ? IdentityType.UserAssignedManagedIdentity
+                            : IdentityType.ServicePrincipal),
+                    ResourceGroup = identityResult.Identity.ResourceGroup,
+                    SubscriptionId = identityResult.Identity.SubscriptionId
+                };
+
+                // For each identity, fetch all data in parallel
+                var identityTasks = new List<Task>();
+
+                // Task 1: Load direct role assignments
+                identityTasks.Add(Task.Run(async () =>
+                {
+                    try
+                    {
+                        var roleAssignments = await _resourceGraphService.FetchRoleAssignmentsForPrincipalsAsync(
+                            new List<string> { identityResult.Identity.PrincipalId });
+
+                        identityResult.DirectRoleAssignments = roleAssignments
+                            .Select(ra => new AppRoleAssignment
+                            {
+                                Id = ra.Id,
+                                RoleName = ra.RoleName,
+                                Scope = ra.Scope,
+                                AssignedTo = "Direct Assignment"
+                            })
+                            .ToList();
+                        identityResult.IsLoadingRoleAssignments = false;
+                        await InvokeAsync(StateHasChanged);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError(ex, "Error loading role assignments for {PrincipalId}", identityResult.Identity.PrincipalId);
+                        identityResult.IsLoadingRoleAssignments = false;
+                        await InvokeAsync(StateHasChanged);
+                    }
+                }));
+
+                // Task 2: Load direct groups
+                identityTasks.Add(Task.Run(async () =>
+                {
+                    try
+                    {
+                        identityResult.SecurityDirectGroups = await _roleAssignmentService.GetDirectGroupsAsync(identity);
+                        identityResult.IsLoadingDirectGroups = false;
+                        await InvokeAsync(StateHasChanged);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError(ex, "Error loading direct groups for {PrincipalId}", identityResult.Identity.PrincipalId);
+                        identityResult.IsLoadingDirectGroups = false;
+                        await InvokeAsync(StateHasChanged);
+                    }
+                }));
+
+                // Task 3: Load indirect groups (must wait for direct groups to load first)
+                identityTasks.Add(Task.Run(async () =>
+                {
+                    try
+                    {
+                        // Wait for direct groups to be loaded first
+                        while (identityResult.IsLoadingDirectGroups)
+                        {
+                            await Task.Delay(100);
+                        }
+                        
+                        identityResult.SecurityIndirectGroups = await _roleAssignmentService.GetIndirectGroupsAsync(
+                            identityResult.SecurityDirectGroups, useParallelProcessing: false);
+                        identityResult.IsLoadingIndirectGroups = false;
+                        await InvokeAsync(StateHasChanged);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError(ex, "Error loading indirect groups for {PrincipalId}", identityResult.Identity.PrincipalId);
+                        identityResult.IsLoadingIndirectGroups = false;
+                        await InvokeAsync(StateHasChanged);
+                    }
+                }));
+
+                // Task 4: Load group role assignments (depends on groups being loaded first)
+                identityTasks.Add(Task.Run(async () =>
+                {
+                    try
+                    {
+                        // Wait for groups to be loaded first
+                        while (identityResult.IsLoadingDirectGroups || identityResult.IsLoadingIndirectGroups)
+                        {
+                            await Task.Delay(100);
+                        }
+                        
+                        await _roleAssignmentService.PopulateGroupRoleAssignmentsAsync(
+                            identityResult.SecurityDirectGroups, identityResult.SecurityIndirectGroups);
+                        identityResult.IsLoadingGroupRoleAssignments = false;
+                        await InvokeAsync(StateHasChanged);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError(ex, "Error loading group role assignments for {PrincipalId}", identityResult.Identity.PrincipalId);
+                        identityResult.IsLoadingGroupRoleAssignments = false;
+                        await InvokeAsync(StateHasChanged);
+                    }
+                }));
+
+                // Task 5: Load API permissions
+                identityTasks.Add(Task.Run(async () =>
+                {
+                    try
+                    {
+                        identityResult.ApiPermissions = await _roleAssignmentService.GetApiPermissionsAsync(identity);
+                        identityResult.IsLoadingApiPermissions = false;
+                        await InvokeAsync(StateHasChanged);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError(ex, "Error loading API permissions for {PrincipalId}", identityResult.Identity.PrincipalId);
+                        identityResult.IsLoadingApiPermissions = false;
+                        await InvokeAsync(StateHasChanged);
+                    }
+                }));
+
+                // Task 6: Load Key Vault access policies (depends on groups being loaded first)
+                identityTasks.Add(Task.Run(async () =>
+                {
+                    try
+                    {
+                        // Wait for groups to be loaded first
+                        while (identityResult.IsLoadingDirectGroups || identityResult.IsLoadingIndirectGroups)
+                        {
+                            await Task.Delay(100);
+                        }
+                        
+                        identityResult.KeyVaultAccessPolicies = await _roleAssignmentService.GetKeyVaultAccessPoliciesAsync(
+                            identity, identityResult.SecurityDirectGroups, identityResult.SecurityIndirectGroups);
+                        identityResult.IsLoadingKeyVaultPolicies = false;
+                        await InvokeAsync(StateHasChanged);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError(ex, "Error loading Key Vault policies for {PrincipalId}", identityResult.Identity.PrincipalId);
+                        identityResult.IsLoadingKeyVaultPolicies = false;
+                        await InvokeAsync(StateHasChanged);
+                    }
+                }));
+
+                // Wait for all tasks for this identity to complete before moving to next identity
+                await Task.WhenAll(identityTasks);
+            }
+
+            allDataLoaded = true;
+    }
+
+    private void ToggleCollapse(string principalId)
+    {
+        if (collapsedIdentities.Contains(principalId))
+        {
+            collapsedIdentities.Remove(principalId);
+        }
+        else
+        {
+            collapsedIdentities.Add(principalId);
+        }
+    }
+
+    private async Task GoToNextPage()
+    {
+        if (currentPage < totalPages)
+        {
+            await LoadPage(currentPage + 1);
+        }
+    }
+
+    private async Task GoToPreviousPage()
+    {
+        if (currentPage > 1)
+        {
+            await LoadPage(currentPage - 1);
+        }
+    }
+
+    private async Task GoToPage(int pageNumber)
+    {
+        if (pageNumber >= 1 && pageNumber <= totalPages)
+        {
+            await LoadPage(pageNumber);
+        }
+    }
+
+    private List<AppRoleAssignment> GetAllRoleAssignmentsForIdentity(IdentityResultWithRoles identityResult)
+    {
+        var allRoleAssignments = new List<AppRoleAssignment>();
+        var processedIds = new HashSet<string>();
+
+        // Collect role assignments from all groups
+        void CollectRoleAssignments(SecurityGroup group)
+        {
+            foreach (var ra in group.RoleAssignments)
+            {
+                // Use a combination of role name and scope as unique identifier
+                var key = $"{ra.RoleName}|{ra.Scope}";
+                if (!processedIds.Contains(key))
+                {
+                    processedIds.Add(key);
+                    allRoleAssignments.Add(ra);
+                }
+            }
+        }
+
+        foreach (var group in identityResult.SecurityDirectGroups)
+        {
+            CollectRoleAssignments(group);
+        }
+        foreach (var group in identityResult.SecurityIndirectGroups)
+        {
+            CollectRoleAssignments(group);
+        }
+
+        return allRoleAssignments;
+    }
+
+    private async Task DownloadExcel()
+    {
+        if (!identityResults.Any())
+        {
+            return;
+        }
+
+        try
+        {
+            // Convert identityResults to IdentityRoleAssignmentResult list
+            var results = identityResults.Select(ir => new IdentityRoleAssignmentResult
+            {
+                Identity = new AppIdentity
+                {
+                    ObjectId = ir.Identity.PrincipalId,
+                    Name = ir.Identity.ResourceName,
+                    Type = ir.Identity.IdentityType == "SystemAssigned" 
+                        ? IdentityType.SystemAssignedManagedIdentity 
+                        : (ir.Identity.IdentityType == "UserAssigned"
+                            ? IdentityType.UserAssignedManagedIdentity
+                            : IdentityType.ServicePrincipal),
+                    ResourceGroup = ir.Identity.ResourceGroup,
+                    SubscriptionId = ir.Identity.SubscriptionId
+                },
+                DirectRoleAssignments = ir.DirectRoleAssignments,
+                SecurityDirectGroups = ir.SecurityDirectGroups,
+                SecurityIndirectGroups = ir.SecurityIndirectGroups,
+                ApiPermissions = ir.ApiPermissions,
+                KeyVaultAccessPolicies = ir.KeyVaultAccessPolicies
+            }).ToList();
+
+            // Generate Excel file using the new multi-identity export method
+            var excelBytes = _excelExportService.ExportMultipleIdentitiesToExcel(results);
+
+            // Create filename with tag value and timestamp
+            var fileName = $"TagSearch_{SanitizeFileName(tagValue)}_{DateTime.Now:yyyyMMdd_HHmmss}.xlsx";
+
+            // Download file using JavaScript interop
+            await JSRuntime.InvokeVoidAsync("downloadFile", fileName, Convert.ToBase64String(excelBytes));
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"An error occurred while generating the Excel file: {ex.Message}";
+        }
+    }
+
+    private string SanitizeFileName(string fileName)
+    {
+        var invalidChars = Path.GetInvalidFileNameChars();
+        return string.Join("_", fileName.Split(invalidChars, StringSplitOptions.RemoveEmptyEntries)).TrimEnd('.');
+    }
+}

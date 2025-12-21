@@ -81,3 +81,21 @@ public class AccessPolicyEntryDto
     public List<string> CertificatePermissions { get; set; } = new();
     public List<string> StoragePermissions { get; set; } = new();
 }
+
+public class ManagedIdentityResourceDto
+{
+    public string SubscriptionId { get; set; } = string.Empty;
+    public string ResourceGroup { get; set; } = string.Empty;
+    public string ResourceId { get; set; } = string.Empty;
+    public string ResourceName { get; set; } = string.Empty;
+    public string ResourceType { get; set; } = string.Empty;
+    public string IdentityType { get; set; } = string.Empty;
+    public string PrincipalId { get; set; } = string.Empty;
+    public string TenantId { get; set; } = string.Empty;
+    public string ManagedIdentityResourceId { get; set; } = string.Empty;
+}
+
+// Alias to unify with duplicate definition in GroupManagementService.cs
+// Both definitions are identical and refer to role assignment data from Azure Resource Graph
+public class AzureRoleAssignmentDto : RoleAssignmentDto { }
+
