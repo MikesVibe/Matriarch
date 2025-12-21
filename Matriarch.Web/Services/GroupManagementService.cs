@@ -27,16 +27,6 @@ public class GroupInfo
     public List<string> ParentGroupIds { get; set; } = new();
 }
 
-public class AzureRoleAssignmentDto
-{
-    public string Id { get; set; } = string.Empty;
-    public string PrincipalId { get; set; } = string.Empty;
-    public string PrincipalType { get; set; } = string.Empty;
-    public string RoleDefinitionId { get; set; } = string.Empty;
-    public string RoleName { get; set; } = string.Empty;
-    public string Scope { get; set; } = string.Empty;
-}
-
 public class GroupManagementService : IGroupManagementService
 {
     private readonly ILogger<GroupManagementService> _logger;
