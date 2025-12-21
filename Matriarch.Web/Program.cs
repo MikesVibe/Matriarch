@@ -13,6 +13,9 @@ var appSettings = new AppSettings();
 builder.Configuration.Bind(appSettings);
 builder.Services.AddSingleton(appSettings);
 
+// Register TenantContext as scoped service (per user session)
+builder.Services.AddScoped<ITenantContext, TenantContext>();
+
 // Register HttpClient for services that need it
 builder.Services.AddHttpClient<IResourceGraphService, AzureResourceGraphService>();
 
