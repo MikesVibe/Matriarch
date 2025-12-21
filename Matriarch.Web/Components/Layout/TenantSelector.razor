@@ -19,7 +19,7 @@
     protected override void OnInitialized()
     {
         availableTenants = TenantContext.GetAvailableTenants();
-        selectedTenant = TenantContext.CurrentTenant ?? (availableTenants.Any() ? availableTenants.First() : string.Empty);
+        selectedTenant = TenantContext.CurrentTenant ?? availableTenants.FirstOrDefault() ?? string.Empty;
     }
 
     private void OnTenantChanged()

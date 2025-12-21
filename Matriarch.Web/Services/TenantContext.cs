@@ -17,48 +17,66 @@ public interface ITenantContext
 public class TenantContext : ITenantContext
 {
     private readonly AppSettings _appSettings;
+    private readonly List<string> _availableTenants;
+    private readonly object _lock = new object();
     private string? _currentTenant;
 
     public TenantContext(AppSettings appSettings)
     {
         _appSettings = appSettings;
+        _availableTenants = _appSettings.Azure.Keys.ToList();
         
         // Set default tenant to the first available tenant
-        if (_appSettings.Azure.Any())
+        if (_availableTenants.Any())
         {
-            _currentTenant = _appSettings.Azure.Keys.First();
+            _currentTenant = _availableTenants.First();
         }
     }
 
-    public string? CurrentTenant => _currentTenant;
+    public string? CurrentTenant
+    {
+        get
+        {
+            lock (_lock)
+            {
+                return _currentTenant;
+            }
+        }
+    }
 
     public AzureSettings GetCurrentTenantSettings()
     {
-        if (string.IsNullOrEmpty(_currentTenant))
+        lock (_lock)
         {
-            throw new InvalidOperationException("No tenant selected. Please configure Azure tenants in appsettings.json");
-        }
+            if (string.IsNullOrEmpty(_currentTenant))
+            {
+                throw new InvalidOperationException("No tenant selected. Please configure Azure tenants in appsettings.json");
+            }
 
-        if (!_appSettings.Azure.TryGetValue(_currentTenant, out var settings))
-        {
-            throw new InvalidOperationException($"Tenant '{_currentTenant}' not found in configuration");
-        }
+            if (!_appSettings.Azure.TryGetValue(_currentTenant, out var settings))
+            {
+                throw new InvalidOperationException($"Tenant '{_currentTenant}' not found in configuration");
+            }
 
-        return settings;
+            return settings;
+        }
     }
 
     public void SetCurrentTenant(string tenantName)
     {
-        if (!_appSettings.Azure.ContainsKey(tenantName))
+        lock (_lock)
         {
-            throw new ArgumentException($"Tenant '{tenantName}' not found in configuration", nameof(tenantName));
-        }
+            if (!_appSettings.Azure.ContainsKey(tenantName))
+            {
+                throw new ArgumentException($"Tenant '{tenantName}' not found in configuration", nameof(tenantName));
+            }
 
-        _currentTenant = tenantName;
+            _currentTenant = tenantName;
+        }
     }
 
     public List<string> GetAvailableTenants()
     {
-        return _appSettings.Azure.Keys.ToList();
+        return _availableTenants;
     }
 }

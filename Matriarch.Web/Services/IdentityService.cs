@@ -18,6 +18,7 @@ public class IdentityService : IIdentityService
 {
     private readonly ILogger<IdentityService> _logger;
     private readonly ITenantContext _tenantContext;
+    private readonly object _lock = new object();
     private GraphServiceClient? _graphClient;
     private string? _currentTenantId;
     private const int MaxGraphPageSize = 999;
@@ -32,19 +33,22 @@ public class IdentityService : IIdentityService
     {
         var settings = _tenantContext.GetCurrentTenantSettings();
         
-        // Recreate client if tenant has changed
-        if (_graphClient == null || _currentTenantId != settings.TenantId)
+        lock (_lock)
         {
-            var credential = new ClientSecretCredential(
-                settings.TenantId,
-                settings.ClientId,
-                settings.ClientSecret);
+            // Recreate client if tenant has changed
+            if (_graphClient == null || _currentTenantId != settings.TenantId)
+            {
+                var credential = new ClientSecretCredential(
+                    settings.TenantId,
+                    settings.ClientId,
+                    settings.ClientSecret);
 
-            _graphClient = new GraphServiceClient(credential);
-            _currentTenantId = settings.TenantId;
+                _graphClient = new GraphServiceClient(credential);
+                _currentTenantId = settings.TenantId;
+            }
+
+            return _graphClient;
         }
-
-        return _graphClient;
     }
 
     public async Task<IdentitySearchResult> SearchIdentitiesAsync(string searchInput)

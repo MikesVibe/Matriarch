@@ -18,6 +18,7 @@ public class AzureResourceGraphService : IResourceGraphService
     private readonly ITenantContext _tenantContext;
     private readonly HttpClient _httpClient;
     private readonly AppSettings _settings;
+    private readonly object _lock = new object();
     private TokenCredential? _credential;
     private string? _currentTenantId;
     private const string ResourceGraphApiEndpoint = "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01";
@@ -43,17 +44,20 @@ public class AzureResourceGraphService : IResourceGraphService
     {
         var tenantSettings = _tenantContext.GetCurrentTenantSettings();
         
-        // Recreate credential if tenant has changed
-        if (_credential == null || _currentTenantId != tenantSettings.TenantId)
+        lock (_lock)
         {
-            _credential = new ClientSecretCredential(
-                tenantSettings.TenantId,
-                tenantSettings.ClientId,
-                tenantSettings.ClientSecret);
-            _currentTenantId = tenantSettings.TenantId;
-        }
+            // Recreate credential if tenant has changed
+            if (_credential == null || _currentTenantId != tenantSettings.TenantId)
+            {
+                _credential = new ClientSecretCredential(
+                    tenantSettings.TenantId,
+                    tenantSettings.ClientId,
+                    tenantSettings.ClientSecret);
+                _currentTenantId = tenantSettings.TenantId;
+            }
 
-        return _credential;
+            return _credential;
+        }
     }
 
     public async Task<List<AzureRoleAssignmentDto>> FetchRoleAssignmentsForPrincipalsAsync(List<string> principalIds)

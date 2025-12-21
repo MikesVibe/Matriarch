@@ -40,6 +40,7 @@ public class GroupManagementService : IGroupManagementService
 {
     private readonly ILogger<GroupManagementService> _logger;
     private readonly ITenantContext _tenantContext;
+    private readonly object _lock = new object();
     private GraphServiceClient? _graphClient;
     private string? _currentTenantId;
     private readonly AppSettings _settings;
@@ -62,19 +63,22 @@ public class GroupManagementService : IGroupManagementService
     {
         var tenantSettings = _tenantContext.GetCurrentTenantSettings();
         
-        // Recreate client if tenant has changed
-        if (_graphClient == null || _currentTenantId != tenantSettings.TenantId)
+        lock (_lock)
         {
-            var credential = new ClientSecretCredential(
-                tenantSettings.TenantId,
-                tenantSettings.ClientId,
-                tenantSettings.ClientSecret);
+            // Recreate client if tenant has changed
+            if (_graphClient == null || _currentTenantId != tenantSettings.TenantId)
+            {
+                var credential = new ClientSecretCredential(
+                    tenantSettings.TenantId,
+                    tenantSettings.ClientId,
+                    tenantSettings.ClientSecret);
 
-            _graphClient = new GraphServiceClient(credential);
-            _currentTenantId = tenantSettings.TenantId;
+                _graphClient = new GraphServiceClient(credential);
+                _currentTenantId = tenantSettings.TenantId;
+            }
+
+            return _graphClient;
         }
-
-        return _graphClient;
     }
 
     public async Task<List<SecurityGroup>> GetGroupMembershipsAsync(Models.Identity identity)
