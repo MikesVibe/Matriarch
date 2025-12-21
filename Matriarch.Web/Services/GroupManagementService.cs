@@ -492,7 +492,7 @@ public class GroupManagementService : IGroupManagementService
             {
                 foreach (var sp in spMembersPage.Value)
                 {
-                    var spType = sp.ServicePrincipalType?.ToLower() == "managedidentity" 
+                    var spType = sp.ServicePrincipalType == "ManagedIdentity" 
                         ? IdentityType.UserAssignedManagedIdentity 
                         : IdentityType.ServicePrincipal;
                     
