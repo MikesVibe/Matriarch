@@ -16,6 +16,7 @@ public interface IGroupManagementService
     Task<(List<string> parentGroupIds, Dictionary<string, GroupInfo> groupInfoMap, TimeSpan elapsedTime)> GetParentGroupsAsync(List<string> directGroupIds, bool useParallelProcessing);
     Task<List<SecurityGroup>> GetTransitiveGroupsAsync(List<SecurityGroup> directGroupIds, bool useParallelProcessing = false);
     List<SecurityGroup> BuildSecurityGroupsWithPreFetchedData(List<string> directGroupIds, Dictionary<string, GroupInfo> groupInfoMap, List<AzureRoleAssignmentDto> roleAssignments);
+    Task<List<Models.Identity>> GetGroupMembersAsync(string groupId);
 }
 
 public class GroupInfo
@@ -24,16 +25,6 @@ public class GroupInfo
     public string DisplayName { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public List<string> ParentGroupIds { get; set; } = new();
-}
-
-public class AzureRoleAssignmentDto
-{
-    public string Id { get; set; } = string.Empty;
-    public string PrincipalId { get; set; } = string.Empty;
-    public string PrincipalType { get; set; } = string.Empty;
-    public string RoleDefinitionId { get; set; } = string.Empty;
-    public string RoleName { get; set; } = string.Empty;
-    public string Scope { get; set; } = string.Empty;
 }
 
 public class GroupManagementService : IGroupManagementService
@@ -461,5 +452,98 @@ public class GroupManagementService : IGroupManagementService
             Description = groupInfo.Description,
             RoleAssignments = groupRoleAssignments,
         };
+    }
+
+    public async Task<List<Models.Identity>> GetGroupMembersAsync(string groupId)
+    {
+        _logger.LogInformation("Fetching members for group {GroupId}", groupId);
+        var members = new List<Models.Identity>();
+
+        try
+        {
+            // Get users
+            var membersPage = await GetGraphClient().Groups[groupId].Members.GraphUser.GetAsync(config =>
+            {
+                config.QueryParameters.Top = MaxGraphPageSize;
+            });
+
+            if (membersPage?.Value != null)
+            {
+                foreach (var user in membersPage.Value)
+                {
+                    members.Add(new Models.Identity
+                    {
+                        ObjectId = user.Id ?? "",
+                        ApplicationId = "",
+                        Email = user.Mail ?? user.UserPrincipalName ?? "",
+                        Name = user.DisplayName ?? "",
+                        Type = IdentityType.User
+                    });
+                }
+            }
+
+            // Get service principals
+            var spMembersPage = await GetGraphClient().Groups[groupId].Members.GraphServicePrincipal.GetAsync(config =>
+            {
+                config.QueryParameters.Top = MaxGraphPageSize;
+            });
+
+            if (spMembersPage?.Value != null)
+            {
+                foreach (var sp in spMembersPage.Value)
+                {
+                    var spType = string.Equals(sp.ServicePrincipalType, "ManagedIdentity", StringComparison.OrdinalIgnoreCase)
+                        ? IdentityType.UserAssignedManagedIdentity 
+                        : IdentityType.ServicePrincipal;
+                    
+                    members.Add(new Models.Identity
+                    {
+                        ObjectId = sp.Id ?? "",
+                        ApplicationId = sp.AppId ?? "",
+                        Email = "",
+                        Name = sp.DisplayName ?? "",
+                        Type = spType,
+                        ServicePrincipalType = sp.ServicePrincipalType
+                    });
+                }
+            }
+
+            // Get groups
+            var groupMembersPage = await GetGraphClient().Groups[groupId].Members.GraphGroup.GetAsync(config =>
+            {
+                config.QueryParameters.Top = MaxGraphPageSize;
+            });
+
+            if (groupMembersPage?.Value != null)
+            {
+                foreach (var group in groupMembersPage.Value)
+                {
+                    if (group.SecurityEnabled == true)
+                    {
+                        members.Add(new Models.Identity
+                        {
+                            ObjectId = group.Id ?? "",
+                            ApplicationId = "",
+                            Email = "",
+                            Name = group.DisplayName ?? "",
+                            Type = IdentityType.Group
+                        });
+                    }
+                }
+            }
+
+            var userCount = members.Count(m => m.Type == IdentityType.User);
+            var spCount = members.Count(m => m.Type == IdentityType.ServicePrincipal || m.Type == IdentityType.UserAssignedManagedIdentity);
+            var groupCount = members.Count(m => m.Type == IdentityType.Group);
+            
+            _logger.LogInformation("Found {TotalCount} members in group {GroupId}: {UserCount} users, {SpCount} service principals/managed identities, {GroupCount} groups", 
+                members.Count, groupId, userCount, spCount, groupCount);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching members for group {GroupId}", groupId);
+        }
+
+        return members;
     }
 }
