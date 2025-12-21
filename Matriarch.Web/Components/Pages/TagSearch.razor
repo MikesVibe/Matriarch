@@ -919,15 +919,31 @@
             foreach (var identityResult in identityResults)
             {
                 // Create an Identity object from the ManagedIdentityResourceDto
+                // Parse the IdentityType string back to the enum
+                IdentityType identityType;
+                if (Enum.TryParse<IdentityType>(identityResult.Identity.IdentityType, out identityType))
+                {
+                    // Successfully parsed the enum value
+                }
+                else if (identityResult.Identity.IdentityType == "SystemAssigned")
+                {
+                    identityType = IdentityType.SystemAssignedManagedIdentity;
+                }
+                else if (identityResult.Identity.IdentityType == "UserAssigned")
+                {
+                    identityType = IdentityType.UserAssignedManagedIdentity;
+                }
+                else
+                {
+                    // Default to ServicePrincipal for unknown types
+                    identityType = IdentityType.ServicePrincipal;
+                }
+
                 var identity = new AppIdentity
                 {
                     ObjectId = identityResult.Identity.PrincipalId,
                     Name = identityResult.Identity.ResourceName,
-                    Type = identityResult.Identity.IdentityType == "SystemAssigned" 
-                        ? IdentityType.SystemAssignedManagedIdentity 
-                        : (identityResult.Identity.IdentityType == "UserAssigned"
-                            ? IdentityType.UserAssignedManagedIdentity
-                            : IdentityType.ServicePrincipal),
+                    Type = identityType,
                     ResourceGroup = identityResult.Identity.ResourceGroup,
                     SubscriptionId = identityResult.Identity.SubscriptionId
                 };
