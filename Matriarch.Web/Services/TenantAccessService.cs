@@ -41,7 +41,9 @@ public class TenantAccessService : ITenantAccessService
                 var graphClient = new GraphServiceClient(credential);
 
                 // Try to look up the user in this tenant
-                var userFilter = $"userPrincipalName eq '{userPrincipalName}'";
+                // Escape single quotes in userPrincipalName to prevent OData injection
+                var escapedUserPrincipalName = userPrincipalName.Replace("'", "''");
+                var userFilter = $"userPrincipalName eq '{escapedUserPrincipalName}'";
                 var users = await graphClient.Users
                     .GetAsync(requestConfiguration =>
                     {

@@ -22,6 +22,7 @@ public class TenantContext : ITenantContext
     private readonly ITenantAccessService _tenantAccessService;
     private readonly AuthenticationStateProvider _authenticationStateProvider;
     private readonly object _lock = new object();
+    private readonly SemaphoreSlim _cacheLock = new SemaphoreSlim(1, 1);
     private string? _currentTenant;
     private List<string>? _cachedAvailableTenants;
 
@@ -79,41 +80,61 @@ public class TenantContext : ITenantContext
 
     public async Task<List<string>> GetAvailableTenantsAsync()
     {
-        // Return cached tenants if available
+        // Return cached tenants if available (double-check locking pattern)
         if (_cachedAvailableTenants != null)
         {
             return _cachedAvailableTenants;
         }
 
-        var authState = await _authenticationStateProvider.GetAuthenticationStateAsync();
-        var user = authState.User;
-
-        if (user.Identity?.IsAuthenticated == true)
+        // Ensure only one thread can fetch tenants at a time
+        await _cacheLock.WaitAsync();
+        try
         {
-            var userPrincipalName = user.FindFirst(ClaimTypes.Name)?.Value 
-                                  ?? user.FindFirst(ClaimTypes.Upn)?.Value
-                                  ?? user.FindFirst("preferred_username")?.Value;
-
-            if (!string.IsNullOrEmpty(userPrincipalName))
+            // Check again after acquiring the lock
+            if (_cachedAvailableTenants != null)
             {
-                _cachedAvailableTenants = await _tenantAccessService.GetAccessibleTenantsAsync(userPrincipalName);
-                
-                // Set default tenant to the first available tenant
-                lock (_lock)
-                {
-                    if (_cachedAvailableTenants.Any() && string.IsNullOrEmpty(_currentTenant))
-                    {
-                        _currentTenant = _cachedAvailableTenants.First();
-                    }
-                }
-                
                 return _cachedAvailableTenants;
             }
-        }
 
-        // If user is not authenticated, return empty list
-        // User needs to authenticate first before seeing tenants
-        _cachedAvailableTenants = new List<string>();
-        return _cachedAvailableTenants;
+            var authState = await _authenticationStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+
+            if (user.Identity?.IsAuthenticated == true)
+            {
+                var userPrincipalName = GetUserPrincipalName(user);
+
+                if (!string.IsNullOrEmpty(userPrincipalName))
+                {
+                    _cachedAvailableTenants = await _tenantAccessService.GetAccessibleTenantsAsync(userPrincipalName);
+                    
+                    // Set default tenant to the first available tenant
+                    lock (_lock)
+                    {
+                        if (_cachedAvailableTenants.Any() && string.IsNullOrEmpty(_currentTenant))
+                        {
+                            _currentTenant = _cachedAvailableTenants.First();
+                        }
+                    }
+                    
+                    return _cachedAvailableTenants;
+                }
+            }
+
+            // If user is not authenticated, return empty list
+            // User needs to authenticate first before seeing tenants
+            _cachedAvailableTenants = new List<string>();
+            return _cachedAvailableTenants;
+        }
+        finally
+        {
+            _cacheLock.Release();
+        }
+    }
+
+    private static string? GetUserPrincipalName(ClaimsPrincipal user)
+    {
+        return user.FindFirst(ClaimTypes.Name)?.Value 
+            ?? user.FindFirst(ClaimTypes.Upn)?.Value
+            ?? user.FindFirst("preferred_username")?.Value;
     }
 }
