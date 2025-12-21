@@ -5,9 +5,11 @@
 @using Microsoft.Graph.Beta.Models
 @using Microsoft.Kiota.Abstractions
 @using Azure.Identity
+@using Microsoft.AspNetCore.Authorization
 @using GraphRoleAssignment = Microsoft.Graph.Beta.Models.RoleAssignment
 @using AppRoleAssignment = Matriarch.Web.Models.RoleAssignment
 @using AppIdentity = Matriarch.Web.Models.Identity
+@attribute [Authorize]
 @inject IResourceGraphService _resourceGraphService
 @inject IRoleAssignmentService _roleAssignmentService
 @inject IExcelExportService _excelExportService

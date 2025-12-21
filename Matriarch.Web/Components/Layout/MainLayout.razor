@@ -1,5 +1,6 @@
 ﻿@inherits LayoutComponentBase
 @using Matriarch.Web.Services
+@using Microsoft.AspNetCore.Components.Authorization
 
 <div class="page">
     <div class="sidebar">
@@ -8,8 +9,16 @@
 
     <main>
         <div class="top-row px-4">
-            <TenantSelector />
-            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank">About</a>
+            <AuthorizeView>
+                <Authorized>
+                    <TenantSelector />
+                    <span class="me-3">Hello, @context.User.Identity?.Name</span>
+                    <a href="MicrosoftIdentity/Account/SignOut">Sign out</a>
+                </Authorized>
+                <NotAuthorized>
+                    <a href="/login">Sign in</a>
+                </NotAuthorized>
+            </AuthorizeView>
         </div>
 
         <article class="content px-4">
