@@ -919,31 +919,11 @@
             foreach (var identityResult in identityResults)
             {
                 // Create an Identity object from the ManagedIdentityResourceDto
-                // Parse the IdentityType string back to the enum
-                IdentityType identityType;
-                if (Enum.TryParse<IdentityType>(identityResult.Identity.IdentityType, out identityType))
-                {
-                    // Successfully parsed the enum value
-                }
-                else if (identityResult.Identity.IdentityType == "SystemAssigned")
-                {
-                    identityType = IdentityType.SystemAssignedManagedIdentity;
-                }
-                else if (identityResult.Identity.IdentityType == "UserAssigned")
-                {
-                    identityType = IdentityType.UserAssignedManagedIdentity;
-                }
-                else
-                {
-                    // Default to ServicePrincipal for unknown types
-                    identityType = IdentityType.ServicePrincipal;
-                }
-
                 var identity = new AppIdentity
                 {
                     ObjectId = identityResult.Identity.PrincipalId,
                     Name = identityResult.Identity.ResourceName,
-                    Type = identityType,
+                    Type = ParseIdentityType(identityResult.Identity.IdentityType),
                     ResourceGroup = identityResult.Identity.ResourceGroup,
                     SubscriptionId = identityResult.Identity.SubscriptionId
                 };
@@ -1176,11 +1156,7 @@
                 {
                     ObjectId = ir.Identity.PrincipalId,
                     Name = ir.Identity.ResourceName,
-                    Type = ir.Identity.IdentityType == "SystemAssigned" 
-                        ? IdentityType.SystemAssignedManagedIdentity 
-                        : (ir.Identity.IdentityType == "UserAssigned"
-                            ? IdentityType.UserAssignedManagedIdentity
-                            : IdentityType.ServicePrincipal),
+                    Type = ParseIdentityType(ir.Identity.IdentityType),
                     ResourceGroup = ir.Identity.ResourceGroup,
                     SubscriptionId = ir.Identity.SubscriptionId
                 },
@@ -1260,6 +1236,29 @@
             TenantId = TenantContext.GetCurrentTenantSettings().TenantId,
             ManagedIdentityResourceId = ""
         };
+    }
+
+    private IdentityType ParseIdentityType(string identityTypeString)
+    {
+        // Try to parse as enum first
+        if (Enum.TryParse<IdentityType>(identityTypeString, out var identityType))
+        {
+            return identityType;
+        }
+        
+        // Handle legacy string values
+        if (identityTypeString == "SystemAssigned")
+        {
+            return IdentityType.SystemAssignedManagedIdentity;
+        }
+        
+        if (identityTypeString == "UserAssigned")
+        {
+            return IdentityType.UserAssignedManagedIdentity;
+        }
+        
+        // Default to ServicePrincipal for unknown types
+        return IdentityType.ServicePrincipal;
     }
 
     private async Task SearchByGroup()
