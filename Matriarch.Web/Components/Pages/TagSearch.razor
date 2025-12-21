@@ -11,6 +11,8 @@
 @inject IResourceGraphService _resourceGraphService
 @inject IRoleAssignmentService _roleAssignmentService
 @inject IExcelExportService _excelExportService
+@inject IGroupManagementService _groupManagementService
+@inject IIdentityService _identityService
 @inject IJSRuntime JSRuntime
 @inject ILogger<TagSearch> Logger
 @inject Matriarch.Web.Configuration.AppSettings AppSettings
@@ -63,11 +65,132 @@
                         </button>
                     </div>
                 }
-                else
+                else if (selectedSearchType == "Group")
                 {
-                    <div class="alert alert-info mt-3" role="alert">
-                        <i class="bi bi-info-circle me-2"></i>
-                        This search type is not yet implemented. Please select "Tag" to search by tag.
+                    <div class="row g-3 mt-2">
+                        <div class="col-md-12">
+                            <label for="groupInput" class="form-label">Group Name or ID:</label>
+                            <input type="text" class="form-control" id="groupInput" @bind="groupSearchInput" @bind:event="oninput" placeholder="Enter group name or ID" />
+                            <div class="form-text">Search for a security group by name or ID. All members of the group will be analyzed.</div>
+                        </div>
+                    </div>
+
+                    @if (groupSearchResults.Any())
+                    {
+                        <div class="row g-3 mt-2">
+                            <div class="col-md-12">
+                                <label class="form-label">Select a Group:</label>
+                                <div class="list-group" style="max-height: 300px; overflow-y: auto;">
+                                    @foreach (var group in groupSearchResults)
+                                    {
+                                        <button type="button" 
+                                                class="list-group-item list-group-item-action @(selectedGroup?.ObjectId == group.ObjectId ? "active" : "")"
+                                                @onclick="@(() => SelectGroup(group))">
+                                            <div class="d-flex w-100 justify-content-between">
+                                                <h6 class="mb-1">@group.Name</h6>
+                                                <small class="text-muted">@group.Type</small>
+                                            </div>
+                                            <small><code>@group.ObjectId</code></small>
+                                        </button>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    }
+
+                    <div class="mt-3">
+                        <button class="btn btn-secondary me-2" @onclick="SearchGroups" disabled="@(isLoading || string.IsNullOrWhiteSpace(groupSearchInput))">
+                            <i class="bi bi-search me-2"></i>Search Groups
+                        </button>
+                        <button class="btn btn-primary" @onclick="SearchByGroup" disabled="@(isLoading || selectedGroup == null)">
+                            @if (isLoading)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                                <span>Loading...</span>
+                            }
+                            else
+                            {
+                                <span>Analyze Group Members</span>
+                            }
+                        </button>
+                    </div>
+                }
+                else if (selectedSearchType == "IdentitySelector")
+                {
+                    <div class="row g-3 mt-2">
+                        <div class="col-md-12">
+                            <label for="identityInput" class="form-label">Identity Search:</label>
+                            <input type="text" class="form-control" id="identityInput" @bind="identitySearchInput" @bind:event="oninput" placeholder="Enter email, name, or ID" />
+                            <div class="form-text">Search for identities by email, display name, or object ID.</div>
+                        </div>
+                    </div>
+
+                    @if (identitySearchResults.Any())
+                    {
+                        <div class="row g-3 mt-2">
+                            <div class="col-md-12">
+                                <label class="form-label">Select Identities:</label>
+                                <div class="list-group" style="max-height: 300px; overflow-y: auto;">
+                                    @foreach (var identity in identitySearchResults)
+                                    {
+                                        <button type="button" 
+                                                class="list-group-item list-group-item-action @(selectedIdentities.Any(i => i.ObjectId == identity.ObjectId) ? "active" : "")"
+                                                @onclick="@(() => ToggleIdentitySelection(identity))">
+                                            <div class="d-flex w-100 justify-content-between">
+                                                <h6 class="mb-1">@identity.Name</h6>
+                                                <small class="text-muted">@identity.Type</small>
+                                            </div>
+                                            <small>
+                                                <code>@identity.ObjectId</code>
+                                                @if (!string.IsNullOrEmpty(identity.Email))
+                                                {
+                                                    <span class="ms-2">@identity.Email</span>
+                                                }
+                                            </small>
+                                        </button>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    }
+
+                    @if (selectedIdentities.Any())
+                    {
+                        <div class="row g-3 mt-2">
+                            <div class="col-md-12">
+                                <div class="alert alert-info">
+                                    <strong>Selected Identities (@selectedIdentities.Count):</strong>
+                                    <ul class="mb-0 mt-2">
+                                        @foreach (var identity in selectedIdentities)
+                                        {
+                                            <li>
+                                                @identity.Name (@identity.Type)
+                                                <button type="button" class="btn btn-sm btn-outline-danger ms-2" @onclick="@(() => RemoveIdentitySelection(identity))">
+                                                    <i class="bi bi-x"></i>
+                                                </button>
+                                            </li>
+                                        }
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    }
+
+                    <div class="mt-3">
+                        <button class="btn btn-secondary me-2" @onclick="SearchIdentities" disabled="@(isLoading || string.IsNullOrWhiteSpace(identitySearchInput))">
+                            <i class="bi bi-search me-2"></i>Search Identities
+                        </button>
+                        <button class="btn btn-primary" @onclick="SearchByIdentities" disabled="@(isLoading || !selectedIdentities.Any())">
+                            @if (isLoading)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                                <span>Loading...</span>
+                            }
+                            else
+                            {
+                                <span>Analyze Selected Identities (@selectedIdentities.Count)</span>
+                            }
+                        </button>
                     </div>
                 }
             </div>
@@ -520,6 +643,16 @@
     private const int pageSize = 50;
     private int totalIdentities = 0;
     private int totalPages => (int)Math.Ceiling((double)totalIdentities / pageSize);
+
+    // Group search variables
+    private string groupSearchInput = "";
+    private List<AppIdentity> groupSearchResults = new();
+    private AppIdentity? selectedGroup = null;
+
+    // Identity selector variables
+    private string identitySearchInput = "";
+    private List<AppIdentity> identitySearchResults = new();
+    private List<AppIdentity> selectedIdentities = new();
 
     private class IdentityResultWithRoles
     {
@@ -1061,5 +1194,198 @@
     {
         var invalidChars = Path.GetInvalidFileNameChars();
         return string.Join("_", fileName.Split(invalidChars, StringSplitOptions.RemoveEmptyEntries)).TrimEnd('.');
+    }
+
+    // Group search methods
+    private async Task SearchGroups()
+    {
+        if (string.IsNullOrWhiteSpace(groupSearchInput))
+        {
+            return;
+        }
+
+        try
+        {
+            var searchResult = await _identityService.SearchIdentitiesAsync(groupSearchInput);
+            groupSearchResults = searchResult.Identities.Where(i => i.Type == IdentityType.Group).ToList();
+            
+            if (!groupSearchResults.Any())
+            {
+                errorMessage = $"No groups found matching '{groupSearchInput}'.";
+            }
+            else
+            {
+                errorMessage = null;
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error searching for groups: {ex.Message}";
+            Logger.LogError(ex, "Error searching for groups with input {Input}", groupSearchInput);
+        }
+    }
+
+    private void SelectGroup(AppIdentity group)
+    {
+        selectedGroup = group;
+    }
+
+    private async Task SearchByGroup()
+    {
+        if (selectedGroup == null)
+        {
+            errorMessage = "Please select a group first.";
+            return;
+        }
+
+        isLoading = true;
+        errorMessage = null;
+        identityResults.Clear();
+        collapsedIdentities.Clear();
+        allDataLoaded = false;
+        currentPage = 1;
+
+        try
+        {
+            Logger.LogInformation("Fetching members for group {GroupId}", selectedGroup.ObjectId);
+            
+            // Get all members of the selected group
+            var groupMembers = await _groupManagementService.GetGroupMembersAsync(selectedGroup.ObjectId);
+
+            if (!groupMembers.Any())
+            {
+                errorMessage = $"No members found in group '{selectedGroup.Name}'.";
+                totalIdentities = 0;
+                return;
+            }
+
+            Logger.LogInformation("Found {Count} members in group {GroupName}", groupMembers.Count, selectedGroup.Name);
+
+            // Convert members to ManagedIdentityResourceDto format
+            allManagedIdentities = groupMembers.Select(member => new ManagedIdentityResourceDto
+            {
+                SubscriptionId = member.SubscriptionId ?? "",
+                ResourceGroup = member.ResourceGroup ?? "",
+                ResourceId = $"/directoryObjects/{member.ObjectId}",
+                ResourceName = member.Name,
+                ResourceType = member.Type.ToString(),
+                IdentityType = member.Type.ToString(),
+                PrincipalId = member.ObjectId,
+                TenantId = TenantContext.GetCurrentTenantSettings().TenantId,
+                ManagedIdentityResourceId = ""
+            }).ToList();
+
+            totalIdentities = allManagedIdentities.Count;
+            
+            // Load first page
+            await LoadPage(1);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"An error occurred while fetching group members: {ex.Message}";
+            Logger.LogError(ex, "Error fetching members for group {GroupId}", selectedGroup.ObjectId);
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    // Identity selector methods
+    private async Task SearchIdentities()
+    {
+        if (string.IsNullOrWhiteSpace(identitySearchInput))
+        {
+            return;
+        }
+
+        try
+        {
+            var searchResult = await _identityService.SearchIdentitiesAsync(identitySearchInput);
+            identitySearchResults = searchResult.Identities;
+            
+            if (!identitySearchResults.Any())
+            {
+                errorMessage = $"No identities found matching '{identitySearchInput}'.";
+            }
+            else
+            {
+                errorMessage = null;
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Error searching for identities: {ex.Message}";
+            Logger.LogError(ex, "Error searching for identities with input {Input}", identitySearchInput);
+        }
+    }
+
+    private void ToggleIdentitySelection(AppIdentity identity)
+    {
+        var existing = selectedIdentities.FirstOrDefault(i => i.ObjectId == identity.ObjectId);
+        if (existing != null)
+        {
+            selectedIdentities.Remove(existing);
+        }
+        else
+        {
+            selectedIdentities.Add(identity);
+        }
+    }
+
+    private void RemoveIdentitySelection(AppIdentity identity)
+    {
+        selectedIdentities.Remove(identity);
+    }
+
+    private async Task SearchByIdentities()
+    {
+        if (!selectedIdentities.Any())
+        {
+            errorMessage = "Please select at least one identity.";
+            return;
+        }
+
+        isLoading = true;
+        errorMessage = null;
+        identityResults.Clear();
+        collapsedIdentities.Clear();
+        allDataLoaded = false;
+        currentPage = 1;
+
+        try
+        {
+            Logger.LogInformation("Analyzing {Count} selected identities", selectedIdentities.Count);
+
+            // Convert selected identities to ManagedIdentityResourceDto format
+            allManagedIdentities = selectedIdentities.Select(identity => new ManagedIdentityResourceDto
+            {
+                SubscriptionId = identity.SubscriptionId ?? "",
+                ResourceGroup = identity.ResourceGroup ?? "",
+                ResourceId = $"/directoryObjects/{identity.ObjectId}",
+                ResourceName = identity.Name,
+                ResourceType = identity.Type.ToString(),
+                IdentityType = identity.Type.ToString(),
+                PrincipalId = identity.ObjectId,
+                TenantId = TenantContext.GetCurrentTenantSettings().TenantId,
+                ManagedIdentityResourceId = ""
+            }).ToList();
+
+            totalIdentities = allManagedIdentities.Count;
+            
+            // Load first page
+            await LoadPage(1);
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"An error occurred while analyzing identities: {ex.Message}";
+            Logger.LogError(ex, "Error analyzing selected identities");
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
     }
 }
