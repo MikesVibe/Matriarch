@@ -111,18 +111,9 @@ public class TenantContext : ITenantContext
             }
         }
 
-        // If user is not authenticated or we can't get their info, return all tenants
-        _cachedAvailableTenants = _appSettings.Azure.Keys.ToList();
-        
-        // Set default tenant to the first available tenant
-        lock (_lock)
-        {
-            if (_cachedAvailableTenants.Any() && string.IsNullOrEmpty(_currentTenant))
-            {
-                _currentTenant = _cachedAvailableTenants.First();
-            }
-        }
-        
+        // If user is not authenticated, return empty list
+        // User needs to authenticate first before seeing tenants
+        _cachedAvailableTenants = new List<string>();
         return _cachedAvailableTenants;
     }
 }

@@ -128,12 +128,14 @@ The application automatically filters available tenants based on user access:
 
 The `Parallelization` section controls how the application processes group hierarchies:
 
-- **EnableParallelProcessing** (default: `false`): When enabled in configuration, allows users to toggle parallel processing in the UI. Parallel processing can significantly improve performance when dealing with large group hierarchies.
 - **MaxDegreeOfParallelism** (default: `4`): The maximum number of concurrent threads to use when parallel processing is enabled. Adjust based on your system resources and Azure API throttling limits.
 - **MaxRetryAttempts** (default: `3`): The number of retry attempts when Azure API throttling (429) or service unavailable (503) errors occur.
 - **RetryDelayMilliseconds** (default: `1000`): The initial delay in milliseconds before retrying. Uses exponential backoff for subsequent retries.
+- **MaxConcurrentTransitiveGroupRequests** (default: `5`): Maximum number of concurrent requests when fetching transitive group memberships.
+- **TransitiveGroupBatchSize** (default: `10`): Number of groups to process in each batch.
+- **DelayBetweenBatchesMilliseconds** (default: `100`): Delay between processing batches to avoid API throttling.
 
-**Note:** Even when `EnableParallelProcessing` is set to `false` in configuration, users can still enable parallel processing via the UI toggle. The configuration setting only affects the default behavior.
+**Note:** Users can enable or disable parallel processing via the UI toggle when loading role assignments.
 
 Alternatively, you can use environment variables:
 - Authentication:

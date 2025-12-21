@@ -55,21 +55,20 @@ public class TenantAccessService : ITenantAccessService
                     _logger.LogInformation("User {UserPrincipalName} has access to tenant {TenantName}", userPrincipalName, tenant.Key);
                     accessibleTenants.Add(tenant.Key);
                 }
+                else
+                {
+                    _logger.LogInformation("User {UserPrincipalName} not found in tenant {TenantName}", userPrincipalName, tenant.Key);
+                }
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Could not verify access for user {UserPrincipalName} to tenant {TenantName}", userPrincipalName, tenant.Key);
-                // Continue checking other tenants
+                // Don't add this tenant to accessible list - fail closed on errors
             }
         }
 
-        // If no tenants are accessible, return all tenants (fail open)
-        if (!accessibleTenants.Any())
-        {
-            _logger.LogWarning("Could not verify access for user {UserPrincipalName} to any tenant, granting access to all", userPrincipalName);
-            return _appSettings.Azure.Keys.ToList();
-        }
-
+        // Return only tenants where user was successfully verified
+        // If no tenants are accessible, user won't be able to select any tenant
         return accessibleTenants;
     }
 }
