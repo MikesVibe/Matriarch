@@ -44,18 +44,66 @@ Unit and integration tests for the Matriarch solution.
 
 ## Configuration
 
-Create an `appsettings.json` file in the `Matriarch.Web` directory with your Azure credentials:
+### Authentication Setup
+
+The application now requires Azure AD authentication for user access. You need to set up two types of Azure App Registrations:
+
+1. **User Authentication App Registration** - For SSO login
+2. **Service Principal(s)** - For querying Azure resources (one per tenant)
+
+#### 1. User Authentication App Registration
+
+Create an App Registration in your primary Azure AD tenant (e.g., ComReg):
+
+1. Go to Azure Portal → Azure Active Directory → App registrations → New registration
+2. Name: `Matriarch-Web-Auth` (or your preferred name)
+3. Supported account types: Choose based on your needs (single tenant or multi-tenant)
+4. Redirect URI: 
+   - Type: Web
+   - URI: `https://localhost:5001/signin-oidc` (add production URL when deployed)
+5. After creation, note the:
+   - Application (client) ID
+   - Directory (tenant) ID
+6. Under "Certificates & secrets", create a client secret (optional, not needed for authentication flow)
+
+#### 2. Service Principal App Registrations
+
+For each Azure tenant you want to query (ComReg, ComProd, etc.), create separate App Registrations with the required API permissions:
+
+- **Microsoft Graph API:**
+  - `Application.Read.All` - Read all applications and service principals
+  - `Directory.Read.All` - Read directory data
+  - `GroupMember.Read.All` - Read group memberships
+- **Azure RBAC:**
+  - Reader role at the subscription or management group level
+
+### Configuration File
+
+Create an `appsettings.json` file in the `Matriarch.Web` directory:
 
 ```json
 {
+  "AzureAd": {
+    "Instance": "https://login.microsoftonline.com/",
+    "TenantId": "your-comreg-tenant-id-here",
+    "ClientId": "your-auth-app-client-id-here",
+    "CallbackPath": "/signin-oidc"
+  },
   "Azure": {
-    "TenantId": "your-tenant-id",
-    "SubscriptionId": "your-subscription-id",
-    "ClientId": "your-client-id",
-    "ClientSecret": "your-client-secret"
+    "ComReg": {
+      "TenantId": "your-comreg-tenant-id",
+      "SubscriptionId": "your-comreg-subscription-id",
+      "ClientId": "your-comreg-service-principal-client-id",
+      "ClientSecret": "your-comreg-service-principal-secret"
+    },
+    "ComProd": {
+      "TenantId": "your-comprod-tenant-id",
+      "SubscriptionId": "your-comprod-subscription-id",
+      "ClientId": "your-comprod-service-principal-client-id",
+      "ClientSecret": "your-comprod-service-principal-secret"
+    }
   },
   "Parallelization": {
-    "EnableParallelProcessing": false,
     "MaxDegreeOfParallelism": 4,
     "MaxRetryAttempts": 3,
     "RetryDelayMilliseconds": 1000
@@ -69,22 +117,37 @@ Create an `appsettings.json` file in the `Matriarch.Web` directory with your Azu
 }
 ```
 
+### Tenant Access Control
+
+The application displays all tenants configured in appsettings.json:
+- When a user signs in, they can see and select from all configured tenants in the dropdown
+- The application attempts to verify user access to each tenant for logging purposes
+- Users can query any configured tenant regardless of verification status
+- Ensure service principal credentials in appsettings.json have the necessary permissions for each tenant
+
 ### Parallelization Settings
 
 The `Parallelization` section controls how the application processes group hierarchies:
 
-- **EnableParallelProcessing** (default: `false`): When enabled in configuration, allows users to toggle parallel processing in the UI. Parallel processing can significantly improve performance when dealing with large group hierarchies.
 - **MaxDegreeOfParallelism** (default: `4`): The maximum number of concurrent threads to use when parallel processing is enabled. Adjust based on your system resources and Azure API throttling limits.
 - **MaxRetryAttempts** (default: `3`): The number of retry attempts when Azure API throttling (429) or service unavailable (503) errors occur.
 - **RetryDelayMilliseconds** (default: `1000`): The initial delay in milliseconds before retrying. Uses exponential backoff for subsequent retries.
+- **MaxConcurrentTransitiveGroupRequests** (default: `5`): Maximum number of concurrent requests when fetching transitive group memberships.
+- **TransitiveGroupBatchSize** (default: `10`): Number of groups to process in each batch.
+- **DelayBetweenBatchesMilliseconds** (default: `100`): Delay between processing batches to avoid API throttling.
 
-**Note:** Even when `EnableParallelProcessing` is set to `false` in configuration, users can still enable parallel processing via the UI toggle. The configuration setting only affects the default behavior.
+**Note:** Users can enable or disable parallel processing via the UI toggle when loading role assignments.
 
 Alternatively, you can use environment variables:
-- `Azure__TenantId`
-- `Azure__SubscriptionId`
-- `Azure__ClientId`
-- `Azure__ClientSecret`
+- Authentication:
+  - `AzureAd__TenantId`
+  - `AzureAd__ClientId`
+- Service Principals:
+  - `Azure__ComReg__TenantId`
+  - `Azure__ComReg__SubscriptionId`
+  - `Azure__ComReg__ClientId`
+  - `Azure__ComReg__ClientSecret`
+  - (similar pattern for other tenants)
 
 ## Building
 
@@ -112,15 +175,19 @@ dotnet run
 Then open your browser and navigate to the URL shown in the console (typically `http://localhost:5000` or `https://localhost:5001`).
 
 **Using the Application:**
-1. Enter an identity search term in the input field:
+1. **Sign In**: Click "Sign in with Microsoft" on the login page
+   - You will be redirected to Azure AD login
+   - Sign in with your Azure account that has access to the configured tenants
+2. **Select Tenant**: Choose the Azure tenant you want to query from the dropdown (only tenants where your account exists will be shown)
+3. Enter an identity search term in the input field:
    - Email address (e.g., `user@example.com`)
    - Object ID (GUID format)
    - Application ID / Client ID (GUID format)
    - Display name (e.g., `John Doe` or `MyApp`)
-2. (Optional) Enable "Parallel Processing" checkbox for faster processing of large group hierarchies
-3. Click "Load Role Assignments"
-4. If multiple identities match your search, select the correct one from the table
-5. View the comprehensive results:
+4. (Optional) Enable "Parallel Processing" checkbox for faster processing of large group hierarchies
+5. Click "Load Role Assignments"
+6. If multiple identities match your search, select the correct one from the table
+7. View the comprehensive results:
    - Identity type and details (including Managed Identity resource information)
    - Direct role assignments
    - Group memberships (direct and indirect)

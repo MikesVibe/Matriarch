@@ -2,10 +2,12 @@
 @page "/roleassignments"
 @using Matriarch.Web.Models
 @using Matriarch.Web.Services
+@using Microsoft.AspNetCore.Authorization
 @inject IRoleAssignmentService _roleAssignmentService
 @inject IExcelExportService _excelExportService
 @inject IJSRuntime JSRuntime
 @rendermode InteractiveServer
+@attribute [Authorize]
 
 <PageTitle>Identity Role Assignments</PageTitle>
 
