@@ -119,10 +119,11 @@ Create an `appsettings.json` file in the `Matriarch.Web` directory:
 
 ### Tenant Access Control
 
-The application automatically filters available tenants based on user access:
-- When a user signs in, the application checks which configured tenants contain their user account
-- Users only see and can select tenants where their account exists
-- This ensures users can only query resources in tenants they have access to
+The application displays all tenants configured in appsettings.json:
+- When a user signs in, they can see and select from all configured tenants in the dropdown
+- The application attempts to verify user access to each tenant for logging purposes
+- Users can query any configured tenant regardless of verification status
+- Ensure service principal credentials in appsettings.json have the necessary permissions for each tenant
 
 ### Parallelization Settings
 

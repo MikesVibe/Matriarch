@@ -30,6 +30,9 @@ public class TenantAccessService : ITenantAccessService
 
         foreach (var tenant in _appSettings.Azure)
         {
+            // Always add the tenant to the list (users can see all configured tenants)
+            accessibleTenants.Add(tenant.Key);
+
             try
             {
                 // Try to authenticate to the tenant using the service principal
@@ -55,22 +58,20 @@ public class TenantAccessService : ITenantAccessService
                 if (users?.Value?.Any() == true)
                 {
                     _logger.LogInformation("User {UserPrincipalName} has access to tenant {TenantName}", userPrincipalName, tenant.Key);
-                    accessibleTenants.Add(tenant.Key);
                 }
                 else
                 {
-                    _logger.LogInformation("User {UserPrincipalName} not found in tenant {TenantName}", userPrincipalName, tenant.Key);
+                    _logger.LogWarning("User {UserPrincipalName} not found in tenant {TenantName}, but tenant is still accessible", userPrincipalName, tenant.Key);
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Could not verify access for user {UserPrincipalName} to tenant {TenantName}", userPrincipalName, tenant.Key);
-                // Don't add this tenant to accessible list - fail closed on errors
+                _logger.LogWarning(ex, "Could not verify access for user {UserPrincipalName} to tenant {TenantName}, but tenant is still accessible", userPrincipalName, tenant.Key);
+                // Still allow access to the tenant - verification is informational only
             }
         }
 
-        // Return only tenants where user was successfully verified
-        // If no tenants are accessible, user won't be able to select any tenant
+        // Return all configured tenants regardless of verification status
         return accessibleTenants;
     }
 }
