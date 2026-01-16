@@ -44,15 +44,26 @@ Unit and integration tests for the Matriarch solution.
 
 ## Configuration
 
+> [!NOTE]
+> Currently this application supports only connection using client credentials (client ID and client secret).
+
 Create an `appsettings.json` file in the `Matriarch.Web` directory with your Azure credentials:
 
 ```json
 {
   "Azure": {
-    "TenantId": "your-tenant-id",
-    "SubscriptionId": "your-subscription-id",
-    "ClientId": "your-client-id",
-    "ClientSecret": "your-client-secret"
+    "Tenant1": {
+      "TenantId": "your-tenant-id-here",
+      "SubscriptionId": "your-subscription-id-here",
+      "ClientId": "your-client-id-here",
+      "ClientSecret": "your-client-secret-here"
+    },
+    "Tenant2": {
+      "TenantId": "your-tenant-id-here",
+      "SubscriptionId": "your-subscription-id-here",
+      "ClientId": "your-client-id-here",
+      "ClientSecret": "your-client-secret-here"
+    }
   },
   "Parallelization": {
     "EnableParallelProcessing": false,
