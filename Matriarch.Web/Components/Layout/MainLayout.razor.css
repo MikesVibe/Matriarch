@@ -9,12 +9,13 @@ main {
 }
 
 .sidebar {
-    background: #000;
+    background: #120f0f;
+    border-right: 1px solid #2a2626;
 }
 
 .top-row {
-    background-color: #ffffff;
-    border-bottom: 1px solid #eee;
+    background-color: #1a1616;
+    border-bottom: 1px solid #2a2626;
     justify-content: space-between;
     height: 4rem;
     display: flex;
@@ -36,23 +37,27 @@ main {
             margin-bottom: 0;
             white-space: nowrap;
             font-weight: 500;
+            color: #ede8e8;
         }
 
         .top-row .tenant-selector select {
             width: auto;
             min-width: 150px;
+            background-color: #2a2626;
+            color: #ede8e8;
+            border-color: #a09a9a;
         }
 
     .top-row ::deep a, .top-row ::deep .btn-link {
         white-space: nowrap;
         text-decoration: none;
-        color: #202020;
+        color: #ede8e8;
         font-size: 0.95rem;
     }
 
     .top-row ::deep a:hover, .top-row ::deep .btn-link:hover {
         text-decoration: underline;
-        color: #000;
+        color: #fff;
     }
 
     .top-row ::deep a:first-child {
