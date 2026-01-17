@@ -20,7 +20,6 @@ public class GraphClientFactoryTests
         var result = GraphClientFactory.ParseCloudEnvironment(value);
 
         // Assert
-        Assert.NotNull(result);
         Assert.True(Enum.IsDefined(typeof(CloudEnvironment), result));
     }
 
