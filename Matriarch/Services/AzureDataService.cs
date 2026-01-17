@@ -51,7 +51,7 @@ public class AzureDataService : IAzureDataService
         // Use ClientSecretCredential for authentication with the correct authority host
         var credentialOptions = new ClientSecretCredentialOptions
         {
-            AuthorityHost = GetAuthorityHost(_cloudEnvironment)
+            AuthorityHost = GraphClientFactory.GetAuthorityHost(_cloudEnvironment)
         };
 
         _credential = new ClientSecretCredential(
@@ -73,17 +73,6 @@ public class AzureDataService : IAzureDataService
 
         // Initialize HttpClient for direct API calls
         _httpClient = new HttpClient();
-    }
-
-    private static Uri GetAuthorityHost(CloudEnvironment cloudEnvironment)
-    {
-        return cloudEnvironment switch
-        {
-            CloudEnvironment.Public => AzureAuthorityHosts.AzurePublicCloud,
-            CloudEnvironment.Government => AzureAuthorityHosts.AzureGovernment,
-            CloudEnvironment.China => AzureAuthorityHosts.AzureChina,
-            _ => throw new ArgumentOutOfRangeException(nameof(cloudEnvironment))
-        };
     }
 
     public async Task<List<AzureRoleAssignment>> FetchRoleAssignmentsAsync()

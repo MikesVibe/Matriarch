@@ -55,7 +55,7 @@ public class AzureResourceGraphService : IResourceGraphService
                 
                 var credentialOptions = new ClientSecretCredentialOptions
                 {
-                    AuthorityHost = GetAuthorityHost(_cloudEnvironment)
+                    AuthorityHost = GraphClientFactory.GetAuthorityHost(_cloudEnvironment)
                 };
                 
                 _credential = new ClientSecretCredential(
@@ -73,17 +73,6 @@ public class AzureResourceGraphService : IResourceGraphService
 
             return _credential;
         }
-    }
-
-    private static Uri GetAuthorityHost(CloudEnvironment cloudEnvironment)
-    {
-        return cloudEnvironment switch
-        {
-            CloudEnvironment.Public => AzureAuthorityHosts.AzurePublicCloud,
-            CloudEnvironment.Government => AzureAuthorityHosts.AzureGovernment,
-            CloudEnvironment.China => AzureAuthorityHosts.AzureChina,
-            _ => throw new ArgumentOutOfRangeException(nameof(cloudEnvironment))
-        };
     }
 
     public async Task<List<AzureRoleAssignmentDto>> FetchRoleAssignmentsForPrincipalsAsync(List<string> principalIds)

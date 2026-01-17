@@ -83,7 +83,7 @@ public static class GraphClientFactory
     /// <summary>
     /// Gets the Azure AD authority host URI for the specified cloud environment
     /// </summary>
-    private static Uri GetAuthorityHost(CloudEnvironment cloudEnvironment)
+    public static Uri GetAuthorityHost(CloudEnvironment cloudEnvironment)
     {
         return cloudEnvironment switch
         {
@@ -113,8 +113,9 @@ public static class GraphClientFactory
     /// <summary>
     /// Parses a string value to CloudEnvironment enum
     /// </summary>
-    /// <param name="value">String representation of cloud environment</param>
-    /// <returns>CloudEnvironment enum value</returns>
+    /// <param name="value">String representation of cloud environment (e.g., "Public", "Government", "China"). Case-insensitive.</param>
+    /// <returns>CloudEnvironment enum value. Returns CloudEnvironment.Public if value is null or whitespace.</returns>
+    /// <exception cref="ArgumentException">Thrown when the value is not a valid cloud environment name.</exception>
     public static CloudEnvironment ParseCloudEnvironment(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
