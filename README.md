@@ -56,13 +56,15 @@ Create an `appsettings.json` file in the `Matriarch.Web` directory with your Azu
       "TenantId": "your-tenant-id-here",
       "SubscriptionId": "your-subscription-id-here",
       "ClientId": "your-client-id-here",
-      "ClientSecret": "your-client-secret-here"
+      "ClientSecret": "your-client-secret-here",
+      "CloudEnvironment": "Public"
     },
     "Tenant2": {
       "TenantId": "your-tenant-id-here",
       "SubscriptionId": "your-subscription-id-here",
       "ClientId": "your-client-id-here",
-      "ClientSecret": "your-client-secret-here"
+      "ClientSecret": "your-client-secret-here",
+      "CloudEnvironment": "Public"
     }
   },
   "Parallelization": {
@@ -75,6 +77,29 @@ Create an `appsettings.json` file in the `Matriarch.Web` directory with your Azu
     "LogLevel": {
       "Default": "Information",
       "Microsoft.AspNetCore": "Warning"
+    }
+  }
+}
+```
+
+### Cloud Environment Support
+
+The application supports multiple Azure cloud environments:
+- **Public** (default): Azure Commercial Cloud
+- **Government**: Azure Government Cloud (US)
+- **China**: Azure China Cloud (21Vianet)
+
+To connect to Azure Government or China clouds, set the `CloudEnvironment` property in your tenant configuration to `"Government"` or `"China"` respectively. If not specified, the default is `"Public"`.
+
+**Example for Azure Government:**
+```json
+{
+  "Azure": {
+    "GovTenant": {
+      "TenantId": "your-tenant-id",
+      "ClientId": "your-client-id",
+      "ClientSecret": "your-client-secret",
+      "CloudEnvironment": "Government"
     }
   }
 }

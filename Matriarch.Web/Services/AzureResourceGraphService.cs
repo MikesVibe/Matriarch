@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using Matriarch.Web.Configuration;
 using Matriarch.Web.Models;
+using Matriarch.Shared.Services;
 
 namespace Matriarch.Web.Services;
 
@@ -21,7 +22,7 @@ public class AzureResourceGraphService : IResourceGraphService
     private readonly object _lock = new object();
     private TokenCredential? _credential;
     private string? _currentTenantId;
-    private const string ResourceGraphApiEndpoint = "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01";
+    private CloudEnvironment _cloudEnvironment;
     
     // Global throttling state - shared across all instances and threads
     private static readonly SemaphoreSlim _throttleSemaphore = new SemaphoreSlim(1, 1);
@@ -49,15 +50,36 @@ public class AzureResourceGraphService : IResourceGraphService
             // Recreate credential if tenant has changed
             if (_credential == null || _currentTenantId != tenantSettings.TenantId)
             {
+                _cloudEnvironment = GraphClientFactory.ParseCloudEnvironment(tenantSettings.CloudEnvironment);
+                
+                var credentialOptions = new ClientSecretCredentialOptions
+                {
+                    AuthorityHost = GraphClientFactory.GetAuthorityHost(_cloudEnvironment)
+                };
+                
                 _credential = new ClientSecretCredential(
                     tenantSettings.TenantId,
                     tenantSettings.ClientId,
-                    tenantSettings.ClientSecret);
+                    tenantSettings.ClientSecret,
+                    credentialOptions);
+                    
                 _currentTenantId = tenantSettings.TenantId;
             }
 
             return _credential;
         }
+    }
+
+    private async Task<(AccessToken Token, string ResourceGraphEndpoint)> GetAuthorizationTokenAsync()
+    {
+        // Must call GetCredential() first to ensure _cloudEnvironment is properly initialized
+        // for the current tenant (especially important for gov environments)
+        var credential = GetCredential();
+        var resourceManagerEndpoint = GraphClientFactory.GetResourceManagerEndpoint(_cloudEnvironment);
+        var resourceGraphEndpoint = $"{resourceManagerEndpoint}/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01";
+        var tokenRequestContext = new TokenRequestContext([$"{resourceManagerEndpoint}/.default"]);
+        var token = await credential.GetTokenAsync(tokenRequestContext, default);
+        return (token, resourceGraphEndpoint);
     }
 
     public async Task<List<AzureRoleAssignmentDto>> FetchRoleAssignmentsForPrincipalsAsync(List<string> principalIds)
@@ -70,7 +92,7 @@ public class AzureResourceGraphService : IResourceGraphService
         _logger.LogInformation("Fetching role assignments for {Count} principals from Azure Resource Graph API...", principalIds.Count);
         
         var roleAssignments = new List<AzureRoleAssignmentDto>();
-        var token = await GetAuthorizationTokenAsync();
+        var (token, resourceGraphEndpoint) = await GetAuthorizationTokenAsync();
 
         // Validate that all principalIds are valid GUIDs to prevent injection
         var validatedIds = principalIds.Where(id => Guid.TryParse(id, out _)).ToList();
@@ -102,7 +124,7 @@ public class AzureResourceGraphService : IResourceGraphService
 
         do
         {
-            var responseDocument = await FetchRoleAssignmentsPageAsync(token, query, skipToken);
+            var responseDocument = await FetchRoleAssignmentsPageAsync(token, resourceGraphEndpoint, query, skipToken);
             var pageOfRoleAssignments = ParseRoleAssignmentsResponse(responseDocument);
             roleAssignments.AddRange(pageOfRoleAssignments);
 
@@ -113,14 +135,7 @@ public class AzureResourceGraphService : IResourceGraphService
         return roleAssignments;
     }
 
-    private async Task<AccessToken> GetAuthorizationTokenAsync()
-    {
-        var tokenRequestContext = new TokenRequestContext(["https://management.azure.com/.default"]);
-        var token = await GetCredential().GetTokenAsync(tokenRequestContext, default);
-        return token;
-    }
-
-    private async Task<JsonDocument> FetchRoleAssignmentsPageAsync(AccessToken token, string customQuery, string? skipToken)
+    private async Task<JsonDocument> FetchRoleAssignmentsPageAsync(AccessToken token, string resourceGraphEndpoint, string customQuery, string? skipToken)
     {
         var requestBody = new Dictionary<string, object>
         {
@@ -140,7 +155,7 @@ public class AzureResourceGraphService : IResourceGraphService
         var jsonContent = JsonSerializer.Serialize(requestBody);
         var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
 
-        var request = new HttpRequestMessage(HttpMethod.Post, ResourceGraphApiEndpoint);
+        var request = new HttpRequestMessage(HttpMethod.Post, resourceGraphEndpoint);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
         request.Content = content;
 
@@ -359,7 +374,7 @@ public class AzureResourceGraphService : IResourceGraphService
         _logger.LogInformation("Fetching Key Vault access policies for {Count} principals from Azure Resource Graph API...", principalIds.Count);
 
         var keyVaults = new List<KeyVaultDto>();
-        var token = await GetAuthorizationTokenAsync();
+        var (token, resourceGraphEndpoint) = await GetAuthorizationTokenAsync();
 
         // Validate that all principalIds are valid GUIDs to prevent injection
         var validatedIds = principalIds.Where(id => Guid.TryParse(id, out _)).ToList();
@@ -381,7 +396,7 @@ public class AzureResourceGraphService : IResourceGraphService
 
         do
         {
-            var responseDocument = await FetchKeyVaultAccessPoliciesPageAsync(token, query, skipToken);
+            var responseDocument = await FetchKeyVaultAccessPoliciesPageAsync(token, resourceGraphEndpoint, query, skipToken);
             var pageOfKeyVaults = ParseKeyVaultAccessPoliciesResponse(responseDocument, validatedIds);
             keyVaults.AddRange(pageOfKeyVaults);
 
@@ -392,7 +407,7 @@ public class AzureResourceGraphService : IResourceGraphService
         return keyVaults;
     }
 
-    private async Task<JsonDocument> FetchKeyVaultAccessPoliciesPageAsync(AccessToken token, string customQuery, string? skipToken)
+    private async Task<JsonDocument> FetchKeyVaultAccessPoliciesPageAsync(AccessToken token, string resourceGraphEndpoint, string customQuery, string? skipToken)
     {
         var requestBody = new Dictionary<string, object>
         {
@@ -412,7 +427,7 @@ public class AzureResourceGraphService : IResourceGraphService
         var jsonContent = JsonSerializer.Serialize(requestBody);
         var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
 
-        var request = new HttpRequestMessage(HttpMethod.Post, ResourceGraphApiEndpoint);
+        var request = new HttpRequestMessage(HttpMethod.Post, resourceGraphEndpoint);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
         request.Content = content;
 
@@ -524,7 +539,7 @@ public class AzureResourceGraphService : IResourceGraphService
         _logger.LogInformation("Fetching managed identities for tag value: {TagValue}", tagValue);
 
         var managedIdentities = new List<ManagedIdentityResourceDto>();
-        var token = await GetAuthorizationTokenAsync();
+        var (token, resourceGraphEndpoint) = await GetAuthorizationTokenAsync();
 
         // Sanitize tag value to prevent injection - allow only alphanumeric, hyphens, underscores
         var sanitizedTag = new string(tagValue.Where(c => char.IsLetterOrDigit(c) || c == '-' || c == '_').ToArray());
@@ -600,7 +615,7 @@ public class AzureResourceGraphService : IResourceGraphService
 
         do
         {
-            var responseDocument = await FetchManagedIdentitiesPageAsync(token, query, skipToken);
+            var responseDocument = await FetchManagedIdentitiesPageAsync(token, resourceGraphEndpoint, query, skipToken);
             var pageOfIdentities = ParseManagedIdentitiesResponse(responseDocument);
             managedIdentities.AddRange(pageOfIdentities);
 
@@ -611,7 +626,7 @@ public class AzureResourceGraphService : IResourceGraphService
         return managedIdentities;
     }
 
-    private async Task<JsonDocument> FetchManagedIdentitiesPageAsync(AccessToken token, string customQuery, string? skipToken)
+    private async Task<JsonDocument> FetchManagedIdentitiesPageAsync(AccessToken token, string resourceGraphEndpoint, string customQuery, string? skipToken)
     {
         var requestBody = new Dictionary<string, object>
         {
@@ -631,7 +646,7 @@ public class AzureResourceGraphService : IResourceGraphService
         var jsonContent = JsonSerializer.Serialize(requestBody);
         var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
 
-        var request = new HttpRequestMessage(HttpMethod.Post, ResourceGraphApiEndpoint);
+        var request = new HttpRequestMessage(HttpMethod.Post, resourceGraphEndpoint);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
         request.Content = content;
 

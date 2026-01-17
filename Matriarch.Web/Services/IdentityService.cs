@@ -4,6 +4,7 @@ using Microsoft.Graph.Beta;
 using Microsoft.Graph.Beta.Models;
 using Matriarch.Web.Models;
 using Matriarch.Web.Configuration;
+using Matriarch.Shared.Services;
 using SharedIdentity = Matriarch.Web.Models.Identity;
 
 namespace Matriarch.Web.Services;
@@ -38,12 +39,14 @@ public class IdentityService : IIdentityService
             // Recreate client if tenant has changed
             if (_graphClient == null || _currentTenantId != settings.TenantId)
             {
-                var credential = new ClientSecretCredential(
+                var cloudEnvironment = GraphClientFactory.ParseCloudEnvironment(settings.CloudEnvironment);
+                
+                _graphClient = GraphClientFactory.CreateClient(
                     settings.TenantId,
                     settings.ClientId,
-                    settings.ClientSecret);
-
-                _graphClient = new GraphServiceClient(credential);
+                    settings.ClientSecret,
+                    cloudEnvironment);
+                    
                 _currentTenantId = settings.TenantId;
             }
 

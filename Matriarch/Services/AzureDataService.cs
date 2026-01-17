@@ -7,6 +7,7 @@ using Microsoft.Graph.Beta.Models;
 using Microsoft.Kiota.Abstractions;
 using Matriarch.Configuration;
 using Matriarch.Models;
+using Matriarch.Shared.Services;
 using System.Text.Json;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -22,8 +23,9 @@ public class AzureDataService : IAzureDataService
     private readonly TokenCredential _credential;
     private readonly HttpClient _httpClient;
     private readonly ICachingService _cachingService;
+    private readonly CloudEnvironment _cloudEnvironment;
     private readonly List<AzureRoleAssignment> _roleAssignments = [];
-    private const string ResourceGraphApiEndpoint = "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01";
+    private readonly string _resourceGraphApiEndpoint;
     private const string _query = @"
                 authorizationresources
                 | where type =~ 'microsoft.authorization/roleassignments'
@@ -43,14 +45,31 @@ public class AzureDataService : IAzureDataService
         _logger = logger;
         _cachingService = cachingService;
 
-        // Use ClientSecretCredential for authentication
+        // Parse cloud environment
+        _cloudEnvironment = GraphClientFactory.ParseCloudEnvironment(settings.Azure.CloudEnvironment);
+
+        // Use ClientSecretCredential for authentication with the correct authority host
+        var credentialOptions = new ClientSecretCredentialOptions
+        {
+            AuthorityHost = GraphClientFactory.GetAuthorityHost(_cloudEnvironment)
+        };
+
         _credential = new ClientSecretCredential(
             settings.Azure.TenantId,
             settings.Azure.ClientId,
-            settings.Azure.ClientSecret);
+            settings.Azure.ClientSecret,
+            credentialOptions);
 
-        // Initialize Graph client for Entra ID operations
-        _graphClient = new GraphServiceClient(_credential);
+        // Initialize Graph client using GraphClientFactory for cloud-aware configuration
+        _graphClient = GraphClientFactory.CreateClient(
+            settings.Azure.TenantId,
+            settings.Azure.ClientId,
+            settings.Azure.ClientSecret,
+            _cloudEnvironment);
+
+        // Set Resource Graph API endpoint based on cloud environment
+        var resourceManagerEndpoint = GraphClientFactory.GetResourceManagerEndpoint(_cloudEnvironment);
+        _resourceGraphApiEndpoint = $"{resourceManagerEndpoint}/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01";
 
         // Initialize HttpClient for direct API calls
         _httpClient = new HttpClient();
@@ -486,7 +505,8 @@ public class AzureDataService : IAzureDataService
 
     private async Task<AccessToken> GetAuthorizationToken()
     {
-        var tokenRequestContext = new TokenRequestContext(["https://management.azure.com/.default"]);
+        var resourceManagerEndpoint = GraphClientFactory.GetResourceManagerEndpoint(_cloudEnvironment);
+        var tokenRequestContext = new TokenRequestContext([$"{resourceManagerEndpoint}/.default"]);
         var token = await _credential.GetTokenAsync(tokenRequestContext, default);
         return token;
     }
@@ -514,7 +534,7 @@ public class AzureDataService : IAzureDataService
         var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
 
         // Set up the HTTP request
-        var request = new HttpRequestMessage(HttpMethod.Post, ResourceGraphApiEndpoint);
+        var request = new HttpRequestMessage(HttpMethod.Post, _resourceGraphApiEndpoint);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
         request.Content = content;
 

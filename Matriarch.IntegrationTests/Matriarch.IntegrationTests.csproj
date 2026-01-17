@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Matriarch.Web\Matriarch.Web.csproj" />
+    <ProjectReference Include="..\Matriarch.Shared\Matriarch.Shared.csproj" />
   </ItemGroup>
 
   <ItemGroup>

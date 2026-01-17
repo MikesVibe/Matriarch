@@ -5,6 +5,7 @@
 @using Microsoft.Graph.Beta.Models
 @using Microsoft.Kiota.Abstractions
 @using Azure.Identity
+@using Matriarch.Shared.Services
 @using GraphRoleAssignment = Microsoft.Graph.Beta.Models.RoleAssignment
 @using AppRoleAssignment = Matriarch.Web.Models.RoleAssignment
 @using AppIdentity = Matriarch.Web.Models.Identity
@@ -743,11 +744,13 @@
         {
             // Create Graph client with current tenant settings
             var tenantSettings = TenantContext.GetCurrentTenantSettings();
-            var credential = new ClientSecretCredential(
+            var cloudEnvironment = GraphClientFactory.ParseCloudEnvironment(tenantSettings.CloudEnvironment);
+            
+            var graphClient = GraphClientFactory.CreateClient(
                 tenantSettings.TenantId,
                 tenantSettings.ClientId,
-                tenantSettings.ClientSecret);
-            var graphClient = new GraphServiceClient(credential);
+                tenantSettings.ClientSecret,
+                cloudEnvironment);
 
             // Construct the tag we're looking for: "backstage-owner-ref:tagValue"
             var searchTag = $"backstage-owner-ref:{tagValue}";

@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Graph.Beta;
 using Matriarch.Web.Configuration;
 using Matriarch.Web.Models;
+using Matriarch.Shared.Services;
 
 namespace Matriarch.Web.Services;
 
@@ -34,12 +35,14 @@ public class AzureApiPermissionsService : IApiPermissionsService
             // Recreate client if tenant has changed
             if (_graphClient == null || _currentTenantId != tenantSettings.TenantId)
             {
-                var credential = new ClientSecretCredential(
+                var cloudEnvironment = GraphClientFactory.ParseCloudEnvironment(tenantSettings.CloudEnvironment);
+                
+                _graphClient = GraphClientFactory.CreateClient(
                     tenantSettings.TenantId,
                     tenantSettings.ClientId,
-                    tenantSettings.ClientSecret);
-
-                _graphClient = new GraphServiceClient(credential);
+                    tenantSettings.ClientSecret,
+                    cloudEnvironment);
+                    
                 _currentTenantId = tenantSettings.TenantId;
             }
 
