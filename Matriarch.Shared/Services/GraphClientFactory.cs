@@ -46,7 +46,7 @@ public static class GraphClientFactory
         var credential = CreateCredential(tenantId, clientId, clientSecret, cloudEnvironment);
         var graphEndpoint = GetGraphEndpoint(cloudEnvironment);
         
-        return new GraphServiceClient(credential, null, graphEndpoint);
+        return new GraphServiceClient(credential, [$"{graphEndpoint}/.default"], $"{graphEndpoint}/v1.0");
     }
 
     /// <summary>

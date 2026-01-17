@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Matriarch.Tests", "Matriarc
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Matriarch.IntegrationTests", "Matriarch.IntegrationTests\Matriarch.IntegrationTests.csproj", "{D63341B4-33C9-4912-BD70-D4A487106660}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Matriarch.Shared", "Matriarch.Shared\Matriarch.Shared.csproj", "{748BC7F9-006F-AC5D-28BA-B440094B68E9}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -55,6 +57,18 @@ Global
 		{D63341B4-33C9-4912-BD70-D4A487106660}.Release|x64.Build.0 = Release|Any CPU
 		{D63341B4-33C9-4912-BD70-D4A487106660}.Release|x86.ActiveCfg = Release|Any CPU
 		{D63341B4-33C9-4912-BD70-D4A487106660}.Release|x86.Build.0 = Release|Any CPU
+		{748BC7F9-006F-AC5D-28BA-B440094B68E9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{748BC7F9-006F-AC5D-28BA-B440094B68E9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{748BC7F9-006F-AC5D-28BA-B440094B68E9}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{748BC7F9-006F-AC5D-28BA-B440094B68E9}.Debug|x64.Build.0 = Debug|Any CPU
+		{748BC7F9-006F-AC5D-28BA-B440094B68E9}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{748BC7F9-006F-AC5D-28BA-B440094B68E9}.Debug|x86.Build.0 = Debug|Any CPU
+		{748BC7F9-006F-AC5D-28BA-B440094B68E9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{748BC7F9-006F-AC5D-28BA-B440094B68E9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{748BC7F9-006F-AC5D-28BA-B440094B68E9}.Release|x64.ActiveCfg = Release|Any CPU
+		{748BC7F9-006F-AC5D-28BA-B440094B68E9}.Release|x64.Build.0 = Release|Any CPU
+		{748BC7F9-006F-AC5D-28BA-B440094B68E9}.Release|x86.ActiveCfg = Release|Any CPU
+		{748BC7F9-006F-AC5D-28BA-B440094B68E9}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
