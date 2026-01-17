@@ -12,6 +12,7 @@ public class AzureSettings
     public string SubscriptionId { get; set; } = string.Empty; // Optional - not used for Resource Graph queries
     public string ClientId { get; set; } = string.Empty;
     public string ClientSecret { get; set; } = string.Empty;
+    public string CloudEnvironment { get; set; } = "Public"; // Public, Government, or China
 }
 
 public class ParallelizationSettings

@@ -4,6 +4,7 @@ using Microsoft.Graph.Beta;
 using Microsoft.Graph.Beta.Models;
 using Matriarch.Web.Models;
 using Matriarch.Web.Configuration;
+using Matriarch.Shared.Services;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 
@@ -59,12 +60,14 @@ public class GroupManagementService : IGroupManagementService
             // Recreate client if tenant has changed
             if (_graphClient == null || _currentTenantId != tenantSettings.TenantId)
             {
-                var credential = new ClientSecretCredential(
+                var cloudEnvironment = GraphClientFactory.ParseCloudEnvironment(tenantSettings.CloudEnvironment);
+                
+                _graphClient = GraphClientFactory.CreateClient(
                     tenantSettings.TenantId,
                     tenantSettings.ClientId,
-                    tenantSettings.ClientSecret);
-
-                _graphClient = new GraphServiceClient(credential);
+                    tenantSettings.ClientSecret,
+                    cloudEnvironment);
+                    
                 _currentTenantId = tenantSettings.TenantId;
             }
 

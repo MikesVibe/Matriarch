@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using Matriarch.Web.Configuration;
 using Matriarch.Web.Models;
+using Matriarch.Shared.Services;
 
 namespace Matriarch.Web.Services;
 
@@ -21,7 +22,8 @@ public class AzureResourceGraphService : IResourceGraphService
     private readonly object _lock = new object();
     private TokenCredential? _credential;
     private string? _currentTenantId;
-    private const string ResourceGraphApiEndpoint = "https://management.azure.com/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01";
+    private string? _resourceGraphApiEndpoint;
+    private CloudEnvironment _cloudEnvironment;
     
     // Global throttling state - shared across all instances and threads
     private static readonly SemaphoreSlim _throttleSemaphore = new SemaphoreSlim(1, 1);
@@ -49,15 +51,39 @@ public class AzureResourceGraphService : IResourceGraphService
             // Recreate credential if tenant has changed
             if (_credential == null || _currentTenantId != tenantSettings.TenantId)
             {
+                _cloudEnvironment = GraphClientFactory.ParseCloudEnvironment(tenantSettings.CloudEnvironment);
+                
+                var credentialOptions = new ClientSecretCredentialOptions
+                {
+                    AuthorityHost = GetAuthorityHost(_cloudEnvironment)
+                };
+                
                 _credential = new ClientSecretCredential(
                     tenantSettings.TenantId,
                     tenantSettings.ClientId,
-                    tenantSettings.ClientSecret);
+                    tenantSettings.ClientSecret,
+                    credentialOptions);
+                    
                 _currentTenantId = tenantSettings.TenantId;
+                
+                // Update Resource Graph API endpoint based on cloud environment
+                var resourceManagerEndpoint = GraphClientFactory.GetResourceManagerEndpoint(_cloudEnvironment);
+                _resourceGraphApiEndpoint = $"{resourceManagerEndpoint}/providers/Microsoft.ResourceGraph/resources?api-version=2021-03-01";
             }
 
             return _credential;
         }
+    }
+
+    private static Uri GetAuthorityHost(CloudEnvironment cloudEnvironment)
+    {
+        return cloudEnvironment switch
+        {
+            CloudEnvironment.Public => AzureAuthorityHosts.AzurePublicCloud,
+            CloudEnvironment.Government => AzureAuthorityHosts.AzureGovernment,
+            CloudEnvironment.China => AzureAuthorityHosts.AzureChina,
+            _ => throw new ArgumentOutOfRangeException(nameof(cloudEnvironment))
+        };
     }
 
     public async Task<List<AzureRoleAssignmentDto>> FetchRoleAssignmentsForPrincipalsAsync(List<string> principalIds)
@@ -115,7 +141,8 @@ public class AzureResourceGraphService : IResourceGraphService
 
     private async Task<AccessToken> GetAuthorizationTokenAsync()
     {
-        var tokenRequestContext = new TokenRequestContext(["https://management.azure.com/.default"]);
+        var resourceManagerEndpoint = GraphClientFactory.GetResourceManagerEndpoint(_cloudEnvironment);
+        var tokenRequestContext = new TokenRequestContext([$"{resourceManagerEndpoint}/.default"]);
         var token = await GetCredential().GetTokenAsync(tokenRequestContext, default);
         return token;
     }
@@ -140,7 +167,7 @@ public class AzureResourceGraphService : IResourceGraphService
         var jsonContent = JsonSerializer.Serialize(requestBody);
         var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
 
-        var request = new HttpRequestMessage(HttpMethod.Post, ResourceGraphApiEndpoint);
+        var request = new HttpRequestMessage(HttpMethod.Post, _resourceGraphApiEndpoint);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
         request.Content = content;
 
@@ -412,7 +439,7 @@ public class AzureResourceGraphService : IResourceGraphService
         var jsonContent = JsonSerializer.Serialize(requestBody);
         var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
 
-        var request = new HttpRequestMessage(HttpMethod.Post, ResourceGraphApiEndpoint);
+        var request = new HttpRequestMessage(HttpMethod.Post, _resourceGraphApiEndpoint);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
         request.Content = content;
 
@@ -631,7 +658,7 @@ public class AzureResourceGraphService : IResourceGraphService
         var jsonContent = JsonSerializer.Serialize(requestBody);
         var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
 
-        var request = new HttpRequestMessage(HttpMethod.Post, ResourceGraphApiEndpoint);
+        var request = new HttpRequestMessage(HttpMethod.Post, _resourceGraphApiEndpoint);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
         request.Content = content;
 
