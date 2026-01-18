@@ -43,8 +43,8 @@ main {
         .top-row .tenant-selector select {
             width: auto;
             min-width: 150px;
-            background-color: #2a2626;
-            color: #ede8e8;
+            background-color: #ede8e8;
+            color: #120f0f;
             border-color: #a09a9a;
         }
 
