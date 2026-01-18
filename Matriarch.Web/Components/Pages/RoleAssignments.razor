@@ -35,7 +35,7 @@
                             Enable Parallel Processing (faster for large group hierarchies)
                         </label>
                     </div>
-                    <div class="d-flex gap-2">
+                    <div class="d-flex justify-content-between align-items-center gap-2">
                         <button class="btn btn-primary" @onclick="LoadRoleAssignments" disabled="@isLoading">
                             @if (isLoading)
                             {
@@ -49,7 +49,7 @@
                         </button>
                         @if (IsDataFullyLoaded())
                         {
-                            <button class="btn btn-primary" @onclick="DownloadExcel">
+                            <button class="btn btn-primary ms-auto" @onclick="DownloadExcel">
                                 <i class="bi bi-download me-2"></i>
                                 Download Results as Excel
                             </button>
