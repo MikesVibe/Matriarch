@@ -7,6 +7,11 @@ html, body {
     padding: 0;
 }
 
+/* Override Bootstrap text-muted to be white for dark theme */
+.text-muted {
+    color: #ede8e8 !important;
+}
+
 /* Typography - clean, modern, legible */
 h1 {
     font-size: 3rem;
