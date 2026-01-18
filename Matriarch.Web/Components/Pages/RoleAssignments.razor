@@ -35,17 +35,26 @@
                             Enable Parallel Processing (faster for large group hierarchies)
                         </label>
                     </div>
-                    <button class="btn btn-primary" @onclick="LoadRoleAssignments" disabled="@isLoading">
-                        @if (isLoading)
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-primary" @onclick="LoadRoleAssignments" disabled="@isLoading">
+                            @if (isLoading)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                                <span>Loading...</span>
+                            }
+                            else
+                            {
+                                <span>Load Role Assignments</span>
+                            }
+                        </button>
+                        @if (IsDataFullyLoaded())
                         {
-                            <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
-                            <span>Loading...</span>
+                            <button class="btn btn-primary" @onclick="DownloadExcel">
+                                <i class="bi bi-download me-2"></i>
+                                Download Results as Excel
+                            </button>
                         }
-                        else
-                        {
-                            <span>Load Role Assignments</span>
-                        }
-                    </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -185,7 +194,7 @@
                     <dl class="row mb-0">
                         <dt class="col-sm-3">Identity Type:</dt>
                         <dd class="col-sm-9">
-                            <span class="badge bg-primary">@GetIdentityTypeDisplay(result.Identity.Type)</span>
+                            <span class="badge bg-primary" role="alert">@GetIdentityTypeDisplay(result.Identity.Type)</span>
                         </dd>
 
                         <dt class="col-sm-3">Name:</dt>
@@ -243,14 +252,7 @@
 
     @if (IsDataFullyLoaded())
     {
-        <div class="row mb-4">
-            <div class="col-md-12">
-                <button class="btn btn-success btn-lg" @onclick="DownloadExcel">
-                    <i class="bi bi-download me-2"></i>
-                    Download Results as Excel
-                </button>
-            </div>
-        </div>
+        <!-- Download button moved to Identity Information card -->
     }
 
     <div class="row mb-4">
@@ -284,8 +286,8 @@
                                     @foreach (var ra in result.DirectRoleAssignments)
                                     {
                                         <tr>
-                                            <td><strong>@ra.RoleName</strong></td>
-                                            <td><code class="text-muted">@ra.Scope</code></td>
+                                            <td>@ra.RoleName</td>
+                                            <td><code>@ra.Scope</code></td>
                                             <td><span class="badge bg-primary">@ra.AssignedTo</span></td>
                                         </tr>
                                     }

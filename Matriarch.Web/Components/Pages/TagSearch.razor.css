@@ -65,6 +65,12 @@
     vertical-align: middle;
     border-color: #2a2626;
     background-color: #1a1616;
+    color: #ede8e8;
+}
+
+.table td code {
+    color: #ede8e8;
+    background-color: #2a2626;
 }
 
 .table-striped tbody tr:nth-of-type(odd) {
