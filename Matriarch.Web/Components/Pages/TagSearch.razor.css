@@ -1,0 +1,174 @@
+/* Input styling - light background on dark theme */
+.form-control {
+    border: 1px solid #a09a9a;
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    font-size: 1rem;
+    transition: border-color 0.15s ease-in-out;
+    background-color: #ede8e8;
+    color: #120f0f;
+}
+
+.form-control:focus {
+    border-color: #120f0f;
+    box-shadow: 0 0 0 0.2rem rgba(18, 15, 15, 0.1);
+    outline: none;
+    background-color: #ede8e8;
+}
+
+.form-label {
+    font-weight: 500;
+    margin-bottom: 0.5rem;
+    color: #ede8e8;
+}
+
+.form-text {
+    color: #a09a9a;
+    font-size: 0.9rem;
+}
+
+/* Select styling - light background on dark theme */
+.form-select {
+    border: 1px solid #a09a9a;
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    font-size: 1rem;
+    transition: border-color 0.15s ease-in-out;
+    background-color: #ede8e8;
+    color: #120f0f;
+}
+
+.form-select:focus {
+    border-color: #120f0f;
+    box-shadow: 0 0 0 0.2rem rgba(18, 15, 15, 0.1);
+    outline: none;
+    background-color: #ede8e8;
+}
+
+/* Table styling - dark background with light text */
+.table {
+    font-size: 0.95rem;
+    color: #ede8e8;
+    background-color: #1a1616;
+}
+
+.table thead th {
+    border-bottom: 2px solid #2a2626;
+    font-weight: 600;
+    color: #ede8e8;
+    padding: 0.75rem;
+    background-color: #1f1b1b;
+}
+
+.table td {
+    padding: 0.75rem;
+    vertical-align: middle;
+    border-color: #2a2626;
+    background-color: #1a1616;
+    color: #ede8e8;
+}
+
+.table td code {
+    color: #ede8e8;
+    background-color: #2a2626;
+}
+
+.table-striped tbody tr:nth-of-type(odd) {
+    background-color: #1f1b1b;
+}
+
+.table-striped tbody tr:nth-of-type(odd) td {
+    background-color: #1f1b1b;
+}
+
+.table-hover tbody tr:hover {
+    background-color: #2a2626;
+}
+
+.table-hover tbody tr:hover td {
+    background-color: #2a2626;
+}
+
+/* Card styling - same as RoleAssignments */
+.card {
+    border: 1px solid #2a2626;
+    border-radius: 8px;
+    margin-bottom: 1rem;
+    background: #1a1616;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.card-header {
+    border-bottom: 1px solid #2a2626;
+    background: #1f1b1b;
+    padding: 1.25rem 1.5rem;
+    border-radius: 8px 8px 0 0;
+}
+
+.card-header h5 {
+    margin: 0;
+    font-weight: 600;
+    color: #ede8e8;
+}
+
+.card-body {
+    padding: 1.5rem;
+    color: #ede8e8;
+}
+
+/* Alert styling - dark theme */
+.alert {
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    border: 1px solid transparent;
+}
+
+.alert-danger {
+    background-color: #3d1a1a;
+    border-color: #5a2626;
+    color: #ff6b6b;
+}
+
+.alert-info {
+    background-color: #1a2a3d;
+    border-color: #26405a;
+    color: #6bb6ff;
+}
+
+.alert-warning {
+    background-color: #3d3a1a;
+    border-color: #5a5226;
+    color: #ffdb6b;
+}
+
+.alert-success {
+    background-color: #1a3d1a;
+    border-color: #265a26;
+    color: #6bff6b;
+}
+
+/* Badge styling */
+.badge {
+    font-weight: 500;
+    padding: 0.4rem 0.75rem;
+    border-radius: 4px;
+    font-size: 0.875rem;
+}
+
+/* Button styling */
+button.btn {
+    transition: all 0.2s ease-in-out;
+}
+
+button.btn:hover {
+    transform: translateY(-1px);
+}
+
+button.btn:active {
+    transform: translateY(0);
+}
+
+.btn-sm {
+    padding: 0.4rem 0.8rem;
+    font-size: 0.875rem;
+}

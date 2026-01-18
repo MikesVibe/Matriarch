@@ -7,9 +7,12 @@
 @inject IJSRuntime JSRuntime
 @rendermode InteractiveServer
 
-<PageTitle>Identity Role Assignments</PageTitle>
+<PageTitle>Matriarch - Azure Identity Role Assignments Viewer</PageTitle>
 
-<h1>Identity Role Assignments Viewer</h1>
+<div class="hero-section">
+    <h1 class="hero-title">Azure Identity Role Assignments Viewer</h1>
+    <p class="hero-subtitle">View Azure role assignments, group memberships, and permissions in real-time</p>
+</div>
 
 <div class="row mb-4">
     <div class="col-md-12">
@@ -32,17 +35,26 @@
                             Enable Parallel Processing (faster for large group hierarchies)
                         </label>
                     </div>
-                    <button class="btn btn-primary" @onclick="LoadRoleAssignments" disabled="@isLoading">
-                        @if (isLoading)
+                    <div class="d-flex justify-content-between align-items-center gap-2">
+                        <button class="btn btn-primary" @onclick="LoadRoleAssignments" disabled="@isLoading">
+                            @if (isLoading)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                                <span>Loading...</span>
+                            }
+                            else
+                            {
+                                <span>Load Role Assignments</span>
+                            }
+                        </button>
+                        @if (IsDataFullyLoaded())
                         {
-                            <span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
-                            <span>Loading...</span>
+                            <button class="btn btn-primary ms-auto" @onclick="DownloadExcel">
+                                <i class="bi bi-download me-2"></i>
+                                Download Results as Excel
+                            </button>
                         }
-                        else
-                        {
-                            <span>Load Role Assignments</span>
-                        }
-                    </button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -67,7 +79,7 @@
     <div class="row mb-4">
         <div class="col-md-12">
             <div class="card">
-                <div class="card-header bg-warning">
+                <div class="card-header">
                     <h5>Multiple Identities Found - Select One</h5>
                 </div>
                 <div class="card-body">
@@ -175,14 +187,14 @@
     <div class="row mb-4">
         <div class="col-md-12">
             <div class="card">
-                <div class="card-header bg-info text-white">
+                <div class="card-header">
                     <h5>Identity Summary</h5>
                 </div>
                 <div class="card-body">
                     <dl class="row mb-0">
                         <dt class="col-sm-3">Identity Type:</dt>
                         <dd class="col-sm-9">
-                            <span class="badge bg-primary">@GetIdentityTypeDisplay(result.Identity.Type)</span>
+                            <span class="badge bg-primary" role="alert">@GetIdentityTypeDisplay(result.Identity.Type)</span>
                         </dd>
 
                         <dt class="col-sm-3">Name:</dt>
@@ -240,20 +252,13 @@
 
     @if (IsDataFullyLoaded())
     {
-        <div class="row mb-4">
-            <div class="col-md-12">
-                <button class="btn btn-success btn-lg" @onclick="DownloadExcel">
-                    <i class="bi bi-download me-2"></i>
-                    Download Results as Excel
-                </button>
-            </div>
-        </div>
+        <!-- Download button moved to Identity Information card -->
     }
 
     <div class="row mb-4">
         <div class="col-md-12">
             <div class="card">
-                <div class="card-header bg-success text-white">
+                <div class="card-header">
                     <h5>Direct Role Assignments</h5>
                 </div>
                 <div class="card-body">
@@ -281,8 +286,8 @@
                                     @foreach (var ra in result.DirectRoleAssignments)
                                     {
                                         <tr>
-                                            <td><strong>@ra.RoleName</strong></td>
-                                            <td><code class="text-muted">@ra.Scope</code></td>
+                                            <td>@ra.RoleName</td>
+                                            <td><code>@ra.Scope</code></td>
                                             <td><span class="badge bg-primary">@ra.AssignedTo</span></td>
                                         </tr>
                                     }
@@ -302,7 +307,7 @@
     <div class="row mb-4">
         <div class="col-md-12">
             <div class="card">
-                <div class="card-header bg-primary text-white">
+                <div class="card-header">
                     <h5>Direct Group Memberships</h5>
                 </div>
                 <div class="card-body">
@@ -343,7 +348,7 @@
     <div class="row mb-4">
         <div class="col-md-12">
             <div class="card">
-                <div class="card-header bg-secondary text-white">
+                <div class="card-header">
                     <h5>Indirect Group Memberships (via parent groups)</h5>
                 </div>
                 <div class="card-body">
@@ -410,7 +415,7 @@
     <div class="row mb-4">
         <div class="col-md-12">
             <div class="card">
-                <div class="card-header bg-warning text-dark">
+                <div class="card-header">
                     <h5>All Role Assignments (from all groups)</h5>
                 </div>
                 <div class="card-body">
@@ -463,7 +468,7 @@
     <div class="row mb-4">
         <div class="col-md-12">
             <div class="card">
-                <div class="card-header bg-dark text-white">
+                <div class="card-header">
                     <h5>API Permissions</h5>
                 </div>
                 <div class="card-body">
@@ -512,7 +517,7 @@
     <div class="row mb-4">
         <div class="col-md-12">
             <div class="card">
-                <div class="card-header bg-info text-white">
+                <div class="card-header">
                     <h5>Key Vault Access Policies</h5>
                 </div>
                 <div class="card-body">
