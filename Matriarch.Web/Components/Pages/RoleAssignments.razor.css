@@ -203,6 +203,18 @@
     color: #6bb6ff;
 }
 
+.bg-success {
+    background-color: #00478F !important;
+    border-color: #26405a;
+    color: #ffffff;
+}
+
+.bg-primary {
+    background-color: #00478F !important;
+    border-color: #26405a;
+    color: #ffffff;
+}
+
 .alert-warning {
     background-color: #3d3a1a;
     border-color: #5a5226;

@@ -280,7 +280,7 @@
                                 <i class="bi @(collapsedIdentities.Contains(identityResult.Identity.PrincipalId) ? "bi-chevron-right" : "bi-chevron-down") me-2"></i>
                                 @identityResult.Identity.ResourceName (@identityResult.Identity.IdentityType)
                             </h5>
-                            <span class="badge bg-light text-dark">@identityResult.DirectRoleAssignments.Count direct role assignments</span>
+                            <span class="badge bg-primary text-dark">@identityResult.DirectRoleAssignments.Count direct role assignments</span>
                         </div>
                     </div>
                     
@@ -417,7 +417,7 @@
                                                     <td>
                                                         @if (group.ChildGroup != null)
                                                         {
-                                                            <span class="badge bg-info">@group.ChildGroup.DisplayName</span>
+                                                            <span class="badge bg-primary">@group.ChildGroup.DisplayName</span>
                                                         }
                                                         else
                                                         {
@@ -465,7 +465,7 @@
                                                     <tr>
                                                         <td><strong>@ra.RoleName</strong></td>
                                                         <td><code class="text-muted">@ra.Scope</code></td>
-                                                        <td><span class="badge bg-info">@ra.AssignedTo</span></td>
+                                                        <td><span class="badge bg-primary">@ra.AssignedTo</span></td>
                                                     </tr>
                                                 }
                                             </tbody>
@@ -505,7 +505,7 @@
                                                 <tr>
                                                     <td><strong>@permission.ResourceDisplayName</strong></td>
                                                     <td><code>@permission.PermissionValue</code></td>
-                                                    <td><span class="badge bg-secondary">@permission.PermissionType</span></td>
+                                                    <td><span class="badge bg-primary">@permission.PermissionType</span></td>
                                                 </tr>
                                             }
                                         </tbody>
@@ -549,7 +549,7 @@
                                                         <br />
                                                         <small class="text-muted"><code>@policy.KeyVaultId</code></small>
                                                     </td>
-                                                    <td><span class="badge bg-info">@policy.AssignedTo</span></td>
+                                                    <td><span class="badge bg-primary">@policy.AssignedTo</span></td>
                                                     <td>
                                                         @if (policy.KeyPermissions.Any())
                                                         {
