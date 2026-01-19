@@ -10,7 +10,7 @@ public class ExcelExportService : IExcelExportService
         using var workbook = new XLWorkbook();
 
         // Add a single comprehensive worksheet for the identity
-        AddComprehensiveIdentityWorksheet(workbook, result, result.Identity.Name);
+        AddComprehensiveIdentityWorksheet(workbook, result, SanitizeSheetName(result.Identity.Name));
 
         // Save to memory stream
         using var stream = new MemoryStream();
@@ -74,6 +74,12 @@ public class ExcelExportService : IExcelExportService
         worksheet.Columns().AdjustToContents();
     }
 
+    /// <summary>
+    /// Adds a comprehensive worksheet containing all identity information.
+    /// </summary>
+    /// <param name="workbook">The Excel workbook to add the worksheet to.</param>
+    /// <param name="result">The identity role assignment result containing all data.</param>
+    /// <param name="sheetName">The sanitized sheet name (must be Excel-compatible).</param>
     private void AddComprehensiveIdentityWorksheet(XLWorkbook workbook, IdentityRoleAssignmentResult result, string sheetName)
     {
         var worksheet = workbook.Worksheets.Add(sheetName);
