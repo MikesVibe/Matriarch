@@ -278,4 +278,85 @@ public class ExcelExportServiceTests
         Assert.Contains(worksheet2.CellsUsed(), cell => cell.Value.ToString() == "user2@example.com");
         Assert.Contains(worksheet2.CellsUsed(), cell => cell.Value.ToString() == "Contributor");
     }
+
+    [Fact]
+    public void ExportToExcel_WithInvalidSheetNameCharacters_SanitizesSheetName()
+    {
+        // Arrange
+        var result = new IdentityRoleAssignmentResult
+        {
+            Identity = new Identity
+            {
+                ObjectId = "test-id",
+                Name = "Test/User\\With*Invalid?Characters[123]:456",
+                Type = IdentityType.User
+            },
+            DirectRoleAssignments = new List<RoleAssignment>(),
+            SecurityDirectGroups = new List<SecurityGroup>(),
+            SecurityIndirectGroups = new List<SecurityGroup>(),
+            ApiPermissions = new List<ApiPermission>(),
+            KeyVaultAccessPolicies = new List<KeyVaultAccessPolicy>()
+        };
+
+        // Act
+        var excelBytes = _service.ExportToExcel(result);
+
+        // Assert
+        Assert.NotNull(excelBytes);
+        Assert.True(excelBytes.Length > 0);
+
+        using var stream = new MemoryStream(excelBytes);
+        using var workbook = new XLWorkbook(stream);
+        
+        // Should have one worksheet with sanitized name
+        Assert.Equal(1, workbook.Worksheets.Count);
+        var worksheet = workbook.Worksheets.First();
+        
+        // Sheet name should not contain invalid characters
+        Assert.DoesNotContain("/", worksheet.Name);
+        Assert.DoesNotContain("\\", worksheet.Name);
+        Assert.DoesNotContain("*", worksheet.Name);
+        Assert.DoesNotContain("?", worksheet.Name);
+        Assert.DoesNotContain("[", worksheet.Name);
+        Assert.DoesNotContain("]", worksheet.Name);
+        Assert.DoesNotContain(":", worksheet.Name);
+    }
+
+    [Fact]
+    public void ExportToExcel_WithLongSheetName_TruncatesTo31Characters()
+    {
+        // Arrange
+        var longName = new string('A', 50);
+        var result = new IdentityRoleAssignmentResult
+        {
+            Identity = new Identity
+            {
+                ObjectId = "test-id",
+                Name = longName,
+                Type = IdentityType.User
+            },
+            DirectRoleAssignments = new List<RoleAssignment>(),
+            SecurityDirectGroups = new List<SecurityGroup>(),
+            SecurityIndirectGroups = new List<SecurityGroup>(),
+            ApiPermissions = new List<ApiPermission>(),
+            KeyVaultAccessPolicies = new List<KeyVaultAccessPolicy>()
+        };
+
+        // Act
+        var excelBytes = _service.ExportToExcel(result);
+
+        // Assert
+        Assert.NotNull(excelBytes);
+        Assert.True(excelBytes.Length > 0);
+
+        using var stream = new MemoryStream(excelBytes);
+        using var workbook = new XLWorkbook(stream);
+        
+        // Should have one worksheet
+        Assert.Equal(1, workbook.Worksheets.Count);
+        var worksheet = workbook.Worksheets.First();
+        
+        // Sheet name should be truncated to 31 characters (Excel limit)
+        Assert.True(worksheet.Name.Length <= 31);
+    }
 }
