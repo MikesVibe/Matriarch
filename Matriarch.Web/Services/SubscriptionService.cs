@@ -65,29 +65,9 @@ public class SubscriptionService : ISubscriptionService
         try
         {
             _logger.LogInformation("Refreshing subscription cache...");
+            
+            // Fetch all subscriptions with management groups in a single query
             var subscriptions = await _resourceGraphService.FetchAllSubscriptionsAsync();
-
-            // Fetch management group hierarchy for each subscription in batches to avoid overwhelming the API
-            const int batchSize = 10; // Process 10 subscriptions at a time
-            for (int i = 0; i < subscriptions.Count; i += batchSize)
-            {
-                var batch = subscriptions.Skip(i).Take(batchSize);
-                var tasks = batch.Select(async sub =>
-                {
-                    try
-                    {
-                        var hierarchy = await _resourceGraphService.FetchManagementGroupHierarchyAsync(sub.SubscriptionId);
-                        sub.ManagementGroupHierarchy = hierarchy;
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Error fetching management group hierarchy for subscription");
-                        sub.ManagementGroupHierarchy = new List<string>();
-                    }
-                });
-
-                await Task.WhenAll(tasks);
-            }
 
             // Update cache
             _subscriptionCache = subscriptions.ToDictionary(s => s.SubscriptionId, StringComparer.OrdinalIgnoreCase);

@@ -114,7 +114,7 @@ public class MockResourceGraphService : IResourceGraphService
 
     public Task<List<SubscriptionDto>> FetchAllSubscriptionsAsync()
     {
-        _logger.LogInformation("Mock: Fetching all subscriptions");
+        _logger.LogInformation("Mock: Fetching all subscriptions with management groups");
 
         var mockSubscriptions = new List<SubscriptionDto>
         {

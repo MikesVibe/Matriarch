@@ -693,28 +693,35 @@ public class AzureResourceGraphService : IResourceGraphService
 
     public async Task<List<SubscriptionDto>> FetchAllSubscriptionsAsync()
     {
-        _logger.LogInformation("Fetching all subscriptions from Azure Resource Graph API...");
+        _logger.LogInformation("Fetching all subscriptions with management groups from Azure Resource Graph API...");
 
         var subscriptions = new List<SubscriptionDto>();
         var (token, resourceGraphEndpoint) = await GetAuthorizationTokenAsync();
 
+        // Single query to fetch all subscriptions with their management group hierarchies
         var query = @"
             ResourceContainers
             | where type =~ 'microsoft.resources/subscriptions'
-            | project subscriptionId, name = tostring(name), tenantId = tostring(tenantId)";
+            | extend mgPath = properties.managementGroupAncestorsChain
+            | project subscriptionId, 
+                      name = tostring(name), 
+                      tenantId = tostring(tenantId),
+                      mgPath
+            | extend mgHierarchy = mgPath
+            | project subscriptionId, name, tenantId, mgHierarchy";
 
         string? skipToken = null;
 
         do
         {
             var responseDocument = await FetchSubscriptionsPageAsync(token, resourceGraphEndpoint, query, skipToken);
-            var pageOfSubscriptions = ParseSubscriptionsResponse(responseDocument);
+            var pageOfSubscriptions = ParseSubscriptionsWithMgResponse(responseDocument);
             subscriptions.AddRange(pageOfSubscriptions);
 
             skipToken = GetContinuationToken(responseDocument);
         } while (!string.IsNullOrEmpty(skipToken));
 
-        _logger.LogInformation("Fetched {Count} subscriptions", subscriptions.Count);
+        _logger.LogInformation("Fetched {Count} subscriptions with management groups", subscriptions.Count);
         return subscriptions;
     }
 
@@ -749,7 +756,7 @@ public class AzureResourceGraphService : IResourceGraphService
         return JsonDocument.Parse(responseContent);
     }
 
-    private static List<SubscriptionDto> ParseSubscriptionsResponse(JsonDocument responseDocument)
+    private static List<SubscriptionDto> ParseSubscriptionsWithMgResponse(JsonDocument responseDocument)
     {
         var subscriptions = new List<SubscriptionDto>();
 
@@ -766,12 +773,31 @@ public class AzureResourceGraphService : IResourceGraphService
                 continue;
             }
 
+            var mgHierarchy = new List<string>();
+            
+            // Parse management group hierarchy
+            if (row.TryGetProperty("mgHierarchy", out var mgProp) && mgProp.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var mgItem in mgProp.EnumerateArray())
+                {
+                    if (mgItem.ValueKind == JsonValueKind.Object &&
+                        mgItem.TryGetProperty("displayName", out var displayNameProp))
+                    {
+                        var displayName = displayNameProp.GetString();
+                        if (!string.IsNullOrEmpty(displayName))
+                        {
+                            mgHierarchy.Add(displayName);
+                        }
+                    }
+                }
+            }
+
             subscriptions.Add(new SubscriptionDto
             {
                 SubscriptionId = row.TryGetProperty("subscriptionId", out var subProp) ? subProp.GetString() ?? string.Empty : string.Empty,
                 Name = row.TryGetProperty("name", out var nameProp) ? nameProp.GetString() ?? string.Empty : string.Empty,
                 TenantId = row.TryGetProperty("tenantId", out var tenantProp) ? tenantProp.GetString() ?? string.Empty : string.Empty,
-                ManagementGroupHierarchy = new List<string>()
+                ManagementGroupHierarchy = mgHierarchy
             });
         }
 
