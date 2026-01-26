@@ -26,6 +26,7 @@ builder.Services.AddScoped<IApiPermissionsService, AzureApiPermissionsService>()
 builder.Services.AddScoped<IResourceGraphService, AzureResourceGraphService>();
 builder.Services.AddScoped<IRoleAssignmentService, AzureRoleAssignmentService>();
 builder.Services.AddScoped<IExcelExportService, ExcelExportService>();
+builder.Services.AddSingleton<ISubscriptionService, SubscriptionService>();
 
 var app = builder.Build();
 

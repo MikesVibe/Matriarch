@@ -21,7 +21,8 @@ public class Identity
     // Managed Identity specific properties
     public string? ResourceGroup { get; set; } // Resource group for Managed Identities
     public string? SubscriptionId { get; set; } // Subscription ID for Managed Identities
-    public string? SubscriptionName { get; set; } // Subscription display name for Managed Identities (not currently populated)
+    public string? SubscriptionName { get; set; } // Subscription display name for Managed Identities
+    public List<string> ManagementGroupHierarchy { get; set; } = new(); // Management group hierarchy from root to child
 }
 
 public class RoleAssignment

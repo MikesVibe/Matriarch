@@ -19,15 +19,20 @@ public class IdentityService : IIdentityService
 {
     private readonly ILogger<IdentityService> _logger;
     private readonly ITenantContext _tenantContext;
+    private readonly ISubscriptionService _subscriptionService;
     private readonly object _lock = new object();
     private GraphServiceClient? _graphClient;
     private string? _currentTenantId;
     private const int MaxGraphPageSize = 999;
 
-    public IdentityService(ITenantContext tenantContext, ILogger<IdentityService> logger)
+    public IdentityService(
+        ITenantContext tenantContext, 
+        ILogger<IdentityService> logger,
+        ISubscriptionService subscriptionService)
     {
         _logger = logger;
         _tenantContext = tenantContext;
+        _subscriptionService = subscriptionService;
     }
 
     private GraphServiceClient GetGraphClient()
@@ -562,6 +567,24 @@ public class IdentityService : IIdentityService
         if (sp.ServicePrincipalType == "ManagedIdentity" && sp.AlternativeNames != null)
         {
             ExtractManagedIdentityResourceInfo(sp.AlternativeNames, identity);
+            
+            // Populate subscription name and management group hierarchy if subscription ID is available
+            if (!string.IsNullOrEmpty(identity.SubscriptionId))
+            {
+                try
+                {
+                    var subscription = await _subscriptionService.GetSubscriptionAsync(identity.SubscriptionId);
+                    if (subscription != null)
+                    {
+                        identity.SubscriptionName = subscription.Name;
+                        identity.ManagementGroupHierarchy = subscription.ManagementGroupHierarchy;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error fetching subscription information for {SubscriptionId}", identity.SubscriptionId);
+                }
+            }
         }
         
         return identity;

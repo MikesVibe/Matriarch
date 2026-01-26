@@ -111,4 +111,43 @@ public class MockResourceGraphService : IResourceGraphService
 
         return Task.FromResult(mockIdentities);
     }
+
+    public Task<List<SubscriptionDto>> FetchAllSubscriptionsAsync()
+    {
+        _logger.LogInformation("Mock: Fetching all subscriptions");
+
+        var mockSubscriptions = new List<SubscriptionDto>
+        {
+            new SubscriptionDto
+            {
+                SubscriptionId = "sub-123",
+                Name = "Development Subscription",
+                TenantId = "tenant-123",
+                ManagementGroupHierarchy = new List<string> { "Root Management Group", "Development" }
+            },
+            new SubscriptionDto
+            {
+                SubscriptionId = "sub-456",
+                Name = "Production Subscription",
+                TenantId = "tenant-123",
+                ManagementGroupHierarchy = new List<string> { "Root Management Group", "Production" }
+            }
+        };
+
+        return Task.FromResult(mockSubscriptions);
+    }
+
+    public Task<List<string>> FetchManagementGroupHierarchyAsync(string subscriptionId)
+    {
+        _logger.LogInformation("Mock: Fetching management group hierarchy for subscription: {SubscriptionId}", subscriptionId);
+
+        var hierarchy = subscriptionId switch
+        {
+            "sub-123" => new List<string> { "Root Management Group", "Development" },
+            "sub-456" => new List<string> { "Root Management Group", "Production" },
+            _ => new List<string> { "Root Management Group" }
+        };
+
+        return Task.FromResult(hierarchy);
+    }
 }

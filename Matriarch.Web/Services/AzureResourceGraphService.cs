@@ -690,4 +690,191 @@ public class AzureResourceGraphService : IResourceGraphService
 
         return identities;
     }
+
+    public async Task<List<SubscriptionDto>> FetchAllSubscriptionsAsync()
+    {
+        _logger.LogInformation("Fetching all subscriptions from Azure Resource Graph API...");
+
+        var subscriptions = new List<SubscriptionDto>();
+        var (token, resourceGraphEndpoint) = await GetAuthorizationTokenAsync();
+
+        var query = @"
+            ResourceContainers
+            | where type =~ 'microsoft.resources/subscriptions'
+            | project subscriptionId, name = tostring(name), tenantId = tostring(tenantId)";
+
+        string? skipToken = null;
+
+        do
+        {
+            var responseDocument = await FetchSubscriptionsPageAsync(token, resourceGraphEndpoint, query, skipToken);
+            var pageOfSubscriptions = ParseSubscriptionsResponse(responseDocument);
+            subscriptions.AddRange(pageOfSubscriptions);
+
+            skipToken = GetContinuationToken(responseDocument);
+        } while (!string.IsNullOrEmpty(skipToken));
+
+        _logger.LogInformation("Fetched {Count} subscriptions", subscriptions.Count);
+        return subscriptions;
+    }
+
+    private async Task<JsonDocument> FetchSubscriptionsPageAsync(AccessToken token, string resourceGraphEndpoint, string customQuery, string? skipToken)
+    {
+        var requestBody = new Dictionary<string, object>
+        {
+            ["query"] = customQuery,
+            ["options"] = new Dictionary<string, object>
+            {
+                ["resultFormat"] = "objectArray",
+                ["$top"] = 1000
+            }
+        };
+
+        if (!string.IsNullOrEmpty(skipToken))
+        {
+            ((Dictionary<string, object>)requestBody["options"])["$skipToken"] = skipToken;
+        }
+
+        var jsonContent = JsonSerializer.Serialize(requestBody);
+        var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+        var request = new HttpRequestMessage(HttpMethod.Post, resourceGraphEndpoint);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
+        request.Content = content;
+
+        var response = await SendRequestWithRetryAsync(request);
+        var responseContent = await response.Content.ReadAsStringAsync();
+        response.Dispose();
+        
+        return JsonDocument.Parse(responseContent);
+    }
+
+    private static List<SubscriptionDto> ParseSubscriptionsResponse(JsonDocument responseDocument)
+    {
+        var subscriptions = new List<SubscriptionDto>();
+
+        if (!responseDocument.RootElement.TryGetProperty("data", out var dataElement) ||
+            dataElement.ValueKind != JsonValueKind.Array)
+        {
+            return subscriptions;
+        }
+
+        foreach (var row in dataElement.EnumerateArray())
+        {
+            if (row.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            subscriptions.Add(new SubscriptionDto
+            {
+                SubscriptionId = row.TryGetProperty("subscriptionId", out var subProp) ? subProp.GetString() ?? string.Empty : string.Empty,
+                Name = row.TryGetProperty("name", out var nameProp) ? nameProp.GetString() ?? string.Empty : string.Empty,
+                TenantId = row.TryGetProperty("tenantId", out var tenantProp) ? tenantProp.GetString() ?? string.Empty : string.Empty,
+                ManagementGroupHierarchy = new List<string>()
+            });
+        }
+
+        return subscriptions;
+    }
+
+    public async Task<List<string>> FetchManagementGroupHierarchyAsync(string subscriptionId)
+    {
+        if (string.IsNullOrWhiteSpace(subscriptionId))
+        {
+            _logger.LogWarning("Subscription ID is empty");
+            return new List<string>();
+        }
+
+        _logger.LogInformation("Fetching management group hierarchy for subscription: {SubscriptionId}", subscriptionId);
+
+        try
+        {
+            // Validate subscription ID is a valid GUID
+            if (!Guid.TryParse(subscriptionId, out _))
+            {
+                _logger.LogWarning("Invalid subscription ID format: {SubscriptionId}", subscriptionId);
+                return new List<string>();
+            }
+
+            var (token, resourceGraphEndpoint) = await GetAuthorizationTokenAsync();
+
+            // Query to get management group ancestry for a subscription
+            var query = $@"
+                ResourceContainers
+                | where type =~ 'microsoft.resources/subscriptions' and subscriptionId == '{subscriptionId}'
+                | extend mgPath = properties.managementGroupAncestorsChain
+                | mv-expand mgInfo = mgPath
+                | extend mgName = tostring(mgInfo.displayName)
+                | project mgName
+                | where isnotempty(mgName)";
+
+            var responseDocument = await FetchManagementGroupHierarchyPageAsync(token, resourceGraphEndpoint, query);
+            var hierarchy = ParseManagementGroupHierarchyResponse(responseDocument);
+
+            _logger.LogInformation("Found {Count} management groups for subscription {SubscriptionId}", hierarchy.Count, subscriptionId);
+            return hierarchy;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error fetching management group hierarchy for subscription: {SubscriptionId}", subscriptionId);
+            return new List<string>();
+        }
+    }
+
+    private async Task<JsonDocument> FetchManagementGroupHierarchyPageAsync(AccessToken token, string resourceGraphEndpoint, string customQuery)
+    {
+        var requestBody = new Dictionary<string, object>
+        {
+            ["query"] = customQuery,
+            ["options"] = new Dictionary<string, object>
+            {
+                ["resultFormat"] = "objectArray",
+                ["$top"] = 1000
+            }
+        };
+
+        var jsonContent = JsonSerializer.Serialize(requestBody);
+        var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+        var request = new HttpRequestMessage(HttpMethod.Post, resourceGraphEndpoint);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
+        request.Content = content;
+
+        var response = await SendRequestWithRetryAsync(request);
+        var responseContent = await response.Content.ReadAsStringAsync();
+        response.Dispose();
+        
+        return JsonDocument.Parse(responseContent);
+    }
+
+    private static List<string> ParseManagementGroupHierarchyResponse(JsonDocument responseDocument)
+    {
+        var hierarchy = new List<string>();
+
+        if (!responseDocument.RootElement.TryGetProperty("data", out var dataElement) ||
+            dataElement.ValueKind != JsonValueKind.Array)
+        {
+            return hierarchy;
+        }
+
+        foreach (var row in dataElement.EnumerateArray())
+        {
+            if (row.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            if (row.TryGetProperty("mgName", out var mgNameProp))
+            {
+                var mgName = mgNameProp.GetString();
+                if (!string.IsNullOrEmpty(mgName))
+                {
+                    hierarchy.Add(mgName);
+                }
+            }
+        }
+
+        return hierarchy;
+    }
 }

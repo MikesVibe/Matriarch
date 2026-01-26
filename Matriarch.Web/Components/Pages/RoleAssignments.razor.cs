@@ -1,10 +1,16 @@
 ﻿using Matriarch.Web.Models;
 using Microsoft.JSInterop;
+using Microsoft.AspNetCore.Components;
+using Matriarch.Web.Services;
+using Matriarch.Shared.Services;
 
 namespace Matriarch.Web.Components.Pages
 {
     public partial class RoleAssignments
     {
+        [Inject] private ITenantContext TenantContext { get; set; } = default!;
+        [Inject] private ISubscriptionService SubscriptionService { get; set; } = default!;
+
         private string identityInput = "";
         private bool isLoading = false;
         private bool useParallelProcessing = true;
@@ -13,6 +19,10 @@ namespace Matriarch.Web.Components.Pages
         private string? errorMessage;
         private IdentitySearchResult? searchResult;
         private Identity? selectedIdentity;
+
+        // Cache for subscription lookups
+        private Dictionary<string, SubscriptionDto> subscriptionCache = new();
+        private bool subscriptionCacheLoaded = false;
 
         // Loading states for progressive loading
         private bool isLoadingDirectRoleAssignments = false;
@@ -88,6 +98,9 @@ namespace Matriarch.Web.Components.Pages
 
             try
             {
+                // Preload subscription cache if not already loaded
+                await EnsureSubscriptionCacheLoadedAsync();
+
                 // Initialize result with identity
                 result = new IdentityRoleAssignmentResult
                 {
@@ -287,6 +300,131 @@ namespace Matriarch.Web.Components.Pages
             // Remove invalid characters from filename
             var invalidChars = Path.GetInvalidFileNameChars();
             return string.Join("_", fileName.Split(invalidChars, StringSplitOptions.RemoveEmptyEntries)).TrimEnd('.');
+        }
+
+        private string? GetIdentityPortalUrl(Identity identity)
+        {
+            var tenantSettings = TenantContext.GetCurrentTenantSettings();
+            var cloudEnvironment = GraphClientFactory.ParseCloudEnvironment(tenantSettings.CloudEnvironment);
+
+            return identity.Type switch
+            {
+                IdentityType.User => AzurePortalUrlHelper.GetUserUrl(cloudEnvironment, identity.ObjectId),
+                IdentityType.Group => AzurePortalUrlHelper.GetGroupUrl(cloudEnvironment, identity.ObjectId),
+                IdentityType.ServicePrincipal => AzurePortalUrlHelper.GetServicePrincipalUrl(cloudEnvironment, identity.ObjectId),
+                IdentityType.UserAssignedManagedIdentity => AzurePortalUrlHelper.GetManagedIdentityUrl(
+                    cloudEnvironment, 
+                    identity.SubscriptionId, 
+                    identity.ResourceGroup, 
+                    identity.Name, 
+                    true),
+                IdentityType.SystemAssignedManagedIdentity => null, // System-assigned MIs don't have their own portal page
+                _ => null
+            };
+        }
+
+        private string GetSubscriptionPortalUrl(string subscriptionId)
+        {
+            var tenantSettings = TenantContext.GetCurrentTenantSettings();
+            var cloudEnvironment = GraphClientFactory.ParseCloudEnvironment(tenantSettings.CloudEnvironment);
+            return AzurePortalUrlHelper.GetSubscriptionUrl(cloudEnvironment, subscriptionId);
+        }
+
+        private RenderFragment RenderScopeWithTooltip(string scope)
+        {
+            return builder =>
+            {
+                var subscriptionId = ExtractSubscriptionIdFromScope(scope);
+                
+                if (!string.IsNullOrEmpty(subscriptionId))
+                {
+                    var subscription = GetSubscriptionInfoCached(subscriptionId);
+                    
+                    if (subscription != null)
+                    {
+                        var tooltipText = $"{subscription.Name}";
+                        if (subscription.ManagementGroupHierarchy != null && subscription.ManagementGroupHierarchy.Any())
+                        {
+                            tooltipText += $"\n{string.Join(" > ", subscription.ManagementGroupHierarchy)}";
+                        }
+
+                        builder.OpenElement(0, "code");
+                        builder.AddAttribute(1, "class", "text-muted");
+                        builder.AddAttribute(2, "title", tooltipText);
+                        builder.AddAttribute(3, "style", "cursor: help;");
+                        builder.AddContent(4, scope);
+                        builder.CloseElement();
+                    }
+                    else
+                    {
+                        // No subscription info available
+                        builder.OpenElement(0, "code");
+                        builder.AddAttribute(1, "class", "text-muted");
+                        builder.AddContent(2, scope);
+                        builder.CloseElement();
+                    }
+                }
+                else
+                {
+                    // Not a subscription scope
+                    builder.OpenElement(0, "code");
+                    builder.AddAttribute(1, "class", "text-muted");
+                    builder.AddContent(2, scope);
+                    builder.CloseElement();
+                }
+            };
+        }
+
+        private string? ExtractSubscriptionIdFromScope(string scope)
+        {
+            // Scope format: /subscriptions/{subscriptionId}/...
+            if (string.IsNullOrEmpty(scope))
+            {
+                return null;
+            }
+
+            var parts = scope.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            for (int i = 0; i < parts.Length - 1; i++)
+            {
+                if (parts[i].Equals("subscriptions", StringComparison.OrdinalIgnoreCase))
+                {
+                    return parts[i + 1];
+                }
+            }
+
+            return null;
+        }
+
+        private SubscriptionDto? GetSubscriptionInfoCached(string subscriptionId)
+        {
+            // This is a synchronous wrapper around async method
+            // In a real scenario, you'd want to load this data asynchronously upfront
+            // For simplicity, we'll return null and handle async properly later
+            if (subscriptionCache.TryGetValue(subscriptionId, out var subscription))
+            {
+                return subscription;
+            }
+            return null;
+        }
+
+        private async Task EnsureSubscriptionCacheLoadedAsync()
+        {
+            if (subscriptionCacheLoaded)
+            {
+                return;
+            }
+
+            try
+            {
+                var subscriptions = await SubscriptionService.GetAllSubscriptionsAsync();
+                subscriptionCache = subscriptions.ToDictionary(s => s.SubscriptionId, StringComparer.OrdinalIgnoreCase);
+                subscriptionCacheLoaded = true;
+            }
+            catch (Exception ex)
+            {
+                // Log error but don't fail the operation
+                Console.WriteLine($"Error loading subscription cache: {ex.Message}");
+            }
         }
     }
 }
