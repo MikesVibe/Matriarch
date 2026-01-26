@@ -118,13 +118,9 @@ public class ExcelExportServiceTests
         using var stream = new MemoryStream(excelBytes);
         using var workbook = new XLWorkbook(stream);
 
-        Assert.Contains(workbook.Worksheets, ws => ws.Name == "Identity Summary");
-        Assert.Contains(workbook.Worksheets, ws => ws.Name == "Direct Role Assignments");
-        Assert.Contains(workbook.Worksheets, ws => ws.Name == "Direct Groups");
-        Assert.Contains(workbook.Worksheets, ws => ws.Name == "Indirect Groups");
-        Assert.Contains(workbook.Worksheets, ws => ws.Name == "All Role Assignments");
-        Assert.Contains(workbook.Worksheets, ws => ws.Name == "API Permissions");
-        Assert.Contains(workbook.Worksheets, ws => ws.Name == "Key Vault Access Policies");
+        // Should have one worksheet named after the identity
+        Assert.Equal(1, workbook.Worksheets.Count);
+        Assert.Contains(workbook.Worksheets, ws => ws.Name == "Test User");
     }
 
     [Fact]
@@ -139,13 +135,12 @@ public class ExcelExportServiceTests
         // Assert
         using var stream = new MemoryStream(excelBytes);
         using var workbook = new XLWorkbook(stream);
-        var worksheet = workbook.Worksheet("Identity Summary");
+        var worksheet = workbook.Worksheet("Test User");
 
-        // Check headers
-        Assert.Equal("Property", worksheet.Cell(1, 1).Value.ToString());
-        Assert.Equal("Value", worksheet.Cell(1, 2).Value.ToString());
+        // Check identity summary section header
+        Assert.Equal("IDENTITY SUMMARY", worksheet.Cell(1, 1).Value.ToString());
 
-        // Check identity name is present
+        // Check identity name and email are present
         Assert.Contains(worksheet.CellsUsed(), cell => cell.Value.ToString() == "Test User");
         Assert.Contains(worksheet.CellsUsed(), cell => cell.Value.ToString() == "test@example.com");
     }
@@ -162,17 +157,13 @@ public class ExcelExportServiceTests
         // Assert
         using var stream = new MemoryStream(excelBytes);
         using var workbook = new XLWorkbook(stream);
-        var worksheet = workbook.Worksheet("Direct Role Assignments");
+        var worksheet = workbook.Worksheet("Test User");
 
-        // Check headers
-        Assert.Equal("Role Name", worksheet.Cell(1, 1).Value.ToString());
-        Assert.Equal("Scope", worksheet.Cell(1, 2).Value.ToString());
-        Assert.Equal("Assigned To", worksheet.Cell(1, 3).Value.ToString());
-
-        // Check role assignment data
-        Assert.Equal("Owner", worksheet.Cell(2, 1).Value.ToString());
-        Assert.Equal("/subscriptions/test-sub", worksheet.Cell(2, 2).Value.ToString());
-        Assert.Equal("Direct Assignment", worksheet.Cell(2, 3).Value.ToString());
+        // Check role assignment data is present in the comprehensive sheet
+        Assert.Contains(worksheet.CellsUsed(), cell => cell.Value.ToString() == "DIRECT ROLE ASSIGNMENTS");
+        Assert.Contains(worksheet.CellsUsed(), cell => cell.Value.ToString() == "Owner");
+        Assert.Contains(worksheet.CellsUsed(), cell => cell.Value.ToString() == "/subscriptions/test-sub");
+        Assert.Contains(worksheet.CellsUsed(), cell => cell.Value.ToString() == "Direct Assignment");
     }
 
     [Fact]
@@ -203,6 +194,169 @@ public class ExcelExportServiceTests
 
         using var stream = new MemoryStream(excelBytes);
         using var workbook = new XLWorkbook(stream);
-        Assert.Equal(7, workbook.Worksheets.Count);
+        Assert.Equal(1, workbook.Worksheets.Count);
+    }
+
+    [Fact]
+    public void ExportMultipleIdentitiesToExcel_WithMultipleResults_CreatesOneSheetPerIdentity()
+    {
+        // Arrange
+        var results = new List<IdentityRoleAssignmentResult>
+        {
+            new IdentityRoleAssignmentResult
+            {
+                Identity = new Identity
+                {
+                    ObjectId = "test-id-1",
+                    Name = "Test User 1",
+                    Email = "user1@example.com",
+                    Type = IdentityType.User
+                },
+                DirectRoleAssignments = new List<RoleAssignment>
+                {
+                    new RoleAssignment
+                    {
+                        Id = "ra-1",
+                        RoleName = "Reader",
+                        Scope = "/subscriptions/sub1",
+                        AssignedTo = "Direct Assignment"
+                    }
+                },
+                SecurityDirectGroups = new List<SecurityGroup>(),
+                SecurityIndirectGroups = new List<SecurityGroup>(),
+                ApiPermissions = new List<ApiPermission>(),
+                KeyVaultAccessPolicies = new List<KeyVaultAccessPolicy>()
+            },
+            new IdentityRoleAssignmentResult
+            {
+                Identity = new Identity
+                {
+                    ObjectId = "test-id-2",
+                    Name = "Test User 2",
+                    Email = "user2@example.com",
+                    Type = IdentityType.User
+                },
+                DirectRoleAssignments = new List<RoleAssignment>
+                {
+                    new RoleAssignment
+                    {
+                        Id = "ra-2",
+                        RoleName = "Contributor",
+                        Scope = "/subscriptions/sub2",
+                        AssignedTo = "Direct Assignment"
+                    }
+                },
+                SecurityDirectGroups = new List<SecurityGroup>(),
+                SecurityIndirectGroups = new List<SecurityGroup>(),
+                ApiPermissions = new List<ApiPermission>(),
+                KeyVaultAccessPolicies = new List<KeyVaultAccessPolicy>()
+            }
+        };
+
+        // Act
+        var excelBytes = _service.ExportMultipleIdentitiesToExcel(results);
+
+        // Assert
+        Assert.NotNull(excelBytes);
+        Assert.True(excelBytes.Length > 0);
+
+        using var stream = new MemoryStream(excelBytes);
+        using var workbook = new XLWorkbook(stream);
+        
+        // Should have one worksheet per identity
+        Assert.Equal(2, workbook.Worksheets.Count);
+        Assert.Contains(workbook.Worksheets, ws => ws.Name == "Test User 1");
+        Assert.Contains(workbook.Worksheets, ws => ws.Name == "Test User 2");
+
+        // Verify first identity's data
+        var worksheet1 = workbook.Worksheet("Test User 1");
+        Assert.Contains(worksheet1.CellsUsed(), cell => cell.Value.ToString() == "user1@example.com");
+        Assert.Contains(worksheet1.CellsUsed(), cell => cell.Value.ToString() == "Reader");
+
+        // Verify second identity's data
+        var worksheet2 = workbook.Worksheet("Test User 2");
+        Assert.Contains(worksheet2.CellsUsed(), cell => cell.Value.ToString() == "user2@example.com");
+        Assert.Contains(worksheet2.CellsUsed(), cell => cell.Value.ToString() == "Contributor");
+    }
+
+    [Fact]
+    public void ExportToExcel_WithInvalidSheetNameCharacters_SanitizesSheetName()
+    {
+        // Arrange
+        var result = new IdentityRoleAssignmentResult
+        {
+            Identity = new Identity
+            {
+                ObjectId = "test-id",
+                Name = "Test/User\\With*Invalid?Characters[123]:456",
+                Type = IdentityType.User
+            },
+            DirectRoleAssignments = new List<RoleAssignment>(),
+            SecurityDirectGroups = new List<SecurityGroup>(),
+            SecurityIndirectGroups = new List<SecurityGroup>(),
+            ApiPermissions = new List<ApiPermission>(),
+            KeyVaultAccessPolicies = new List<KeyVaultAccessPolicy>()
+        };
+
+        // Act
+        var excelBytes = _service.ExportToExcel(result);
+
+        // Assert
+        Assert.NotNull(excelBytes);
+        Assert.True(excelBytes.Length > 0);
+
+        using var stream = new MemoryStream(excelBytes);
+        using var workbook = new XLWorkbook(stream);
+        
+        // Should have one worksheet with sanitized name
+        Assert.Equal(1, workbook.Worksheets.Count);
+        var worksheet = workbook.Worksheets.First();
+        
+        // Sheet name should not contain invalid characters
+        Assert.DoesNotContain("/", worksheet.Name);
+        Assert.DoesNotContain("\\", worksheet.Name);
+        Assert.DoesNotContain("*", worksheet.Name);
+        Assert.DoesNotContain("?", worksheet.Name);
+        Assert.DoesNotContain("[", worksheet.Name);
+        Assert.DoesNotContain("]", worksheet.Name);
+        Assert.DoesNotContain(":", worksheet.Name);
+    }
+
+    [Fact]
+    public void ExportToExcel_WithLongSheetName_TruncatesTo31Characters()
+    {
+        // Arrange
+        var longName = new string('A', 50);
+        var result = new IdentityRoleAssignmentResult
+        {
+            Identity = new Identity
+            {
+                ObjectId = "test-id",
+                Name = longName,
+                Type = IdentityType.User
+            },
+            DirectRoleAssignments = new List<RoleAssignment>(),
+            SecurityDirectGroups = new List<SecurityGroup>(),
+            SecurityIndirectGroups = new List<SecurityGroup>(),
+            ApiPermissions = new List<ApiPermission>(),
+            KeyVaultAccessPolicies = new List<KeyVaultAccessPolicy>()
+        };
+
+        // Act
+        var excelBytes = _service.ExportToExcel(result);
+
+        // Assert
+        Assert.NotNull(excelBytes);
+        Assert.True(excelBytes.Length > 0);
+
+        using var stream = new MemoryStream(excelBytes);
+        using var workbook = new XLWorkbook(stream);
+        
+        // Should have one worksheet
+        Assert.Equal(1, workbook.Worksheets.Count);
+        var worksheet = workbook.Worksheets.First();
+        
+        // Sheet name should be truncated to 31 characters (Excel limit)
+        Assert.True(worksheet.Name.Length <= 31);
     }
 }
