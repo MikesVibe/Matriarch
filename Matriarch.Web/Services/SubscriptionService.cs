@@ -67,22 +67,27 @@ public class SubscriptionService : ISubscriptionService
             _logger.LogInformation("Refreshing subscription cache...");
             var subscriptions = await _resourceGraphService.FetchAllSubscriptionsAsync();
 
-            // Fetch management group hierarchy for each subscription in parallel
-            var tasks = subscriptions.Select(async sub =>
+            // Fetch management group hierarchy for each subscription in batches to avoid overwhelming the API
+            const int batchSize = 10; // Process 10 subscriptions at a time
+            for (int i = 0; i < subscriptions.Count; i += batchSize)
             {
-                try
+                var batch = subscriptions.Skip(i).Take(batchSize);
+                var tasks = batch.Select(async sub =>
                 {
-                    var hierarchy = await _resourceGraphService.FetchManagementGroupHierarchyAsync(sub.SubscriptionId);
-                    sub.ManagementGroupHierarchy = hierarchy;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Error fetching management group hierarchy for subscription {SubscriptionId}", sub.SubscriptionId);
-                    sub.ManagementGroupHierarchy = new List<string>();
-                }
-            });
+                    try
+                    {
+                        var hierarchy = await _resourceGraphService.FetchManagementGroupHierarchyAsync(sub.SubscriptionId);
+                        sub.ManagementGroupHierarchy = hierarchy;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Error fetching management group hierarchy for subscription");
+                        sub.ManagementGroupHierarchy = new List<string>();
+                    }
+                });
 
-            await Task.WhenAll(tasks);
+                await Task.WhenAll(tasks);
+            }
 
             // Update cache
             _subscriptionCache = subscriptions.ToDictionary(s => s.SubscriptionId, StringComparer.OrdinalIgnoreCase);

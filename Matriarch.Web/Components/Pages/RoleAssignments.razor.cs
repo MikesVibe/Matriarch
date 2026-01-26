@@ -3,6 +3,7 @@ using Microsoft.JSInterop;
 using Microsoft.AspNetCore.Components;
 using Matriarch.Web.Services;
 using Matriarch.Shared.Services;
+using Microsoft.Extensions.Logging;
 
 namespace Matriarch.Web.Components.Pages
 {
@@ -10,6 +11,7 @@ namespace Matriarch.Web.Components.Pages
     {
         [Inject] private ITenantContext TenantContext { get; set; } = default!;
         [Inject] private ISubscriptionService SubscriptionService { get; set; } = default!;
+        [Inject] private ILogger<RoleAssignments> Logger { get; set; } = default!;
 
         private string identityInput = "";
         private bool isLoading = false;
@@ -397,9 +399,7 @@ namespace Matriarch.Web.Components.Pages
 
         private SubscriptionDto? GetSubscriptionInfoCached(string subscriptionId)
         {
-            // This is a synchronous wrapper around async method
-            // In a real scenario, you'd want to load this data asynchronously upfront
-            // For simplicity, we'll return null and handle async properly later
+            // Returns subscription from the preloaded cache
             if (subscriptionCache.TryGetValue(subscriptionId, out var subscription))
             {
                 return subscription;
@@ -422,8 +422,7 @@ namespace Matriarch.Web.Components.Pages
             }
             catch (Exception ex)
             {
-                // Log error but don't fail the operation
-                Console.WriteLine($"Error loading subscription cache: {ex.Message}");
+                Logger.LogWarning(ex, "Error loading subscription cache");
             }
         }
     }

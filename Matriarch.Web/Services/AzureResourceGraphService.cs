@@ -786,20 +786,21 @@ public class AzureResourceGraphService : IResourceGraphService
             return new List<string>();
         }
 
-        _logger.LogInformation("Fetching management group hierarchy for subscription: {SubscriptionId}", subscriptionId);
+        _logger.LogInformation("Fetching management group hierarchy for subscription");
 
         try
         {
-            // Validate subscription ID is a valid GUID
+            // Validate subscription ID is a valid GUID to prevent injection
             if (!Guid.TryParse(subscriptionId, out _))
             {
-                _logger.LogWarning("Invalid subscription ID format: {SubscriptionId}", subscriptionId);
+                _logger.LogWarning("Invalid subscription ID format provided");
                 return new List<string>();
             }
 
             var (token, resourceGraphEndpoint) = await GetAuthorizationTokenAsync();
 
             // Query to get management group ancestry for a subscription
+            // Note: subscriptionId is validated as GUID above to prevent injection
             var query = $@"
                 ResourceContainers
                 | where type =~ 'microsoft.resources/subscriptions' and subscriptionId == '{subscriptionId}'
@@ -812,12 +813,12 @@ public class AzureResourceGraphService : IResourceGraphService
             var responseDocument = await FetchManagementGroupHierarchyPageAsync(token, resourceGraphEndpoint, query);
             var hierarchy = ParseManagementGroupHierarchyResponse(responseDocument);
 
-            _logger.LogInformation("Found {Count} management groups for subscription {SubscriptionId}", hierarchy.Count, subscriptionId);
+            _logger.LogInformation("Found {Count} management groups for subscription", hierarchy.Count);
             return hierarchy;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Error fetching management group hierarchy for subscription: {SubscriptionId}", subscriptionId);
+            _logger.LogWarning(ex, "Error fetching management group hierarchy for subscription");
             return new List<string>();
         }
     }
