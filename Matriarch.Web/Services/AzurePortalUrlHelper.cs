@@ -23,7 +23,7 @@ public static class AzurePortalUrlHelper
     /// <summary>
     /// Constructs a URL to a managed identity resource in the Azure Portal.
     /// </summary>
-    public static string? GetManagedIdentityUrl(CloudEnvironment cloudEnvironment, string? subscriptionId, string? resourceGroup, string identityName, bool isUserAssigned)
+    public static string? GetManagedIdentityUrl(CloudEnvironment cloudEnvironment, string tenantId, string? subscriptionId, string? resourceGroup, string identityName, bool isUserAssigned)
     {
         if (string.IsNullOrEmpty(subscriptionId) || string.IsNullOrEmpty(resourceGroup))
         {
@@ -34,8 +34,8 @@ public static class AzurePortalUrlHelper
         
         if (isUserAssigned)
         {
-            // User-assigned managed identity resource URL
-            return $"{portalUrl}/#view/Microsoft_Azure_ManagedServiceIdentity/Identity.ReactView/resourceId/%2Fsubscriptions%2F{subscriptionId}%2FresourceGroups%2F{resourceGroup}%2Fproviders%2FMicrosoft.ManagedIdentity%2FuserAssignedIdentities%2F{identityName}";
+            // User-assigned managed identity resource URL with tenant ID
+            return $"{portalUrl}/#@{tenantId}/resource/subscriptions/{subscriptionId}/resourceGroups/{resourceGroup}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/{identityName}/overview";
         }
         else
         {
@@ -48,10 +48,10 @@ public static class AzurePortalUrlHelper
     /// <summary>
     /// Constructs a URL to a subscription in the Azure Portal.
     /// </summary>
-    public static string GetSubscriptionUrl(CloudEnvironment cloudEnvironment, string subscriptionId)
+    public static string GetSubscriptionUrl(CloudEnvironment cloudEnvironment, string tenantId, string subscriptionId)
     {
         var portalUrl = GetPortalUrl(cloudEnvironment);
-        return $"{portalUrl}/#view/Microsoft_Azure_Billing/SubscriptionsBlade/subscriptionId/{subscriptionId}";
+        return $"{portalUrl}/#@{tenantId}/resource/subscriptions/{subscriptionId}/overview";
     }
 
     /// <summary>

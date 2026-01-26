@@ -42,6 +42,9 @@ namespace Matriarch.Web.Components.Pages
                 return;
             }
 
+            // Trim whitespace from identity input
+            identityInput = identityInput.Trim();
+
             isLoading = true;
             errorMessage = null;
             result = null;
@@ -308,6 +311,7 @@ namespace Matriarch.Web.Components.Pages
         {
             var tenantSettings = TenantContext.GetCurrentTenantSettings();
             var cloudEnvironment = GraphClientFactory.ParseCloudEnvironment(tenantSettings.CloudEnvironment);
+            var tenantId = tenantSettings.TenantId;
 
             return identity.Type switch
             {
@@ -315,7 +319,8 @@ namespace Matriarch.Web.Components.Pages
                 IdentityType.Group => AzurePortalUrlHelper.GetGroupUrl(cloudEnvironment, identity.ObjectId),
                 IdentityType.ServicePrincipal => AzurePortalUrlHelper.GetServicePrincipalUrl(cloudEnvironment, identity.ObjectId),
                 IdentityType.UserAssignedManagedIdentity => AzurePortalUrlHelper.GetManagedIdentityUrl(
-                    cloudEnvironment, 
+                    cloudEnvironment,
+                    tenantId,
                     identity.SubscriptionId, 
                     identity.ResourceGroup, 
                     identity.Name, 
@@ -329,7 +334,8 @@ namespace Matriarch.Web.Components.Pages
         {
             var tenantSettings = TenantContext.GetCurrentTenantSettings();
             var cloudEnvironment = GraphClientFactory.ParseCloudEnvironment(tenantSettings.CloudEnvironment);
-            return AzurePortalUrlHelper.GetSubscriptionUrl(cloudEnvironment, subscriptionId);
+            var tenantId = tenantSettings.TenantId;
+            return AzurePortalUrlHelper.GetSubscriptionUrl(cloudEnvironment, tenantId, subscriptionId);
         }
 
         private RenderFragment RenderScopeWithTooltip(string scope)
@@ -337,6 +343,7 @@ namespace Matriarch.Web.Components.Pages
             return builder =>
             {
                 var subscriptionId = ExtractSubscriptionIdFromScope(scope);
+                var managementGroupId = ExtractManagementGroupIdFromScope(scope);
                 
                 if (!string.IsNullOrEmpty(subscriptionId))
                 {
@@ -366,9 +373,21 @@ namespace Matriarch.Web.Components.Pages
                         builder.CloseElement();
                     }
                 }
+                else if (!string.IsNullOrEmpty(managementGroupId))
+                {
+                    // Management Group scope - show tooltip with MG ID
+                    var tooltipText = $"Management Group: {managementGroupId}";
+
+                    builder.OpenElement(0, "code");
+                    builder.AddAttribute(1, "class", "text-muted");
+                    builder.AddAttribute(2, "title", tooltipText);
+                    builder.AddAttribute(3, "style", "cursor: help;");
+                    builder.AddContent(4, scope);
+                    builder.CloseElement();
+                }
                 else
                 {
-                    // Not a subscription scope
+                    // Not a subscription or management group scope
                     builder.OpenElement(0, "code");
                     builder.AddAttribute(1, "class", "text-muted");
                     builder.AddContent(2, scope);
@@ -389,6 +408,26 @@ namespace Matriarch.Web.Components.Pages
             for (int i = 0; i < parts.Length - 1; i++)
             {
                 if (parts[i].Equals("subscriptions", StringComparison.OrdinalIgnoreCase))
+                {
+                    return parts[i + 1];
+                }
+            }
+
+            return null;
+        }
+
+        private string? ExtractManagementGroupIdFromScope(string scope)
+        {
+            // Scope format: /providers/Microsoft.Management/managementGroups/{managementGroupId}
+            if (string.IsNullOrEmpty(scope))
+            {
+                return null;
+            }
+
+            var parts = scope.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            for (int i = 0; i < parts.Length - 1; i++)
+            {
+                if (parts[i].Equals("managementGroups", StringComparison.OrdinalIgnoreCase))
                 {
                     return parts[i + 1];
                 }
