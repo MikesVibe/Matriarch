@@ -57,10 +57,10 @@ public static class AzurePortalUrlHelper
     /// <summary>
     /// Constructs a URL to a service principal in the Azure Portal (Enterprise Application).
     /// </summary>
-    public static string GetServicePrincipalUrl(CloudEnvironment cloudEnvironment, string objectId)
+    public static string GetServicePrincipalUrl(CloudEnvironment cloudEnvironment, string objectId, string appId)
     {
         var portalUrl = GetPortalUrl(cloudEnvironment);
-        return $"{portalUrl}/#view/Microsoft_AAD_IAM/ManagedAppMenuBlade/~/Overview/objectId/{objectId}";
+        return $"{portalUrl}/#view/Microsoft_AAD_IAM/ManagedAppMenuBlade/~/Overview/objectId/{objectId}/appId/{appId}";
     }
 
     /// <summary>

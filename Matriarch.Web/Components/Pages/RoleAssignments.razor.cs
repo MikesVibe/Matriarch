@@ -22,8 +22,9 @@ namespace Matriarch.Web.Components.Pages
         private IdentitySearchResult? searchResult;
         private Identity? selectedIdentity;
 
-        // Cache for subscription lookups
+        // Cache for subscription and management group lookups
         private Dictionary<string, SubscriptionDto> subscriptionCache = new();
+        private Dictionary<string, ManagementGroupDto> managementGroupCache = new();
         private bool subscriptionCacheLoaded = false;
 
         // Loading states for progressive loading
@@ -317,7 +318,7 @@ namespace Matriarch.Web.Components.Pages
             {
                 IdentityType.User => AzurePortalUrlHelper.GetUserUrl(cloudEnvironment, identity.ObjectId),
                 IdentityType.Group => AzurePortalUrlHelper.GetGroupUrl(cloudEnvironment, identity.ObjectId),
-                IdentityType.ServicePrincipal => AzurePortalUrlHelper.GetServicePrincipalUrl(cloudEnvironment, identity.ObjectId),
+                IdentityType.ServicePrincipal => AzurePortalUrlHelper.GetServicePrincipalUrl(cloudEnvironment, identity.ObjectId, identity.ApplicationId),
                 IdentityType.UserAssignedManagedIdentity => AzurePortalUrlHelper.GetManagedIdentityUrl(
                     cloudEnvironment,
                     tenantId,
@@ -375,8 +376,18 @@ namespace Matriarch.Web.Components.Pages
                 }
                 else if (!string.IsNullOrEmpty(managementGroupId))
                 {
-                    // Management Group scope - show tooltip with MG ID
-                    var tooltipText = $"Management Group: {managementGroupId}";
+                    // Management Group scope - show tooltip with MG display name
+                    var mg = GetManagementGroupInfoCached(managementGroupId);
+                    string tooltipText;
+                    
+                    if (mg != null && !string.IsNullOrEmpty(mg.DisplayName))
+                    {
+                        tooltipText = $"Management Group: {mg.DisplayName}";
+                    }
+                    else
+                    {
+                        tooltipText = $"Management Group: {managementGroupId}";
+                    }
 
                     builder.OpenElement(0, "code");
                     builder.AddAttribute(1, "class", "text-muted");
@@ -446,6 +457,16 @@ namespace Matriarch.Web.Components.Pages
             return null;
         }
 
+        private ManagementGroupDto? GetManagementGroupInfoCached(string managementGroupName)
+        {
+            // Returns management group from the preloaded cache
+            if (managementGroupCache.TryGetValue(managementGroupName, out var mg))
+            {
+                return mg;
+            }
+            return null;
+        }
+
         private async Task EnsureSubscriptionCacheLoadedAsync()
         {
             if (subscriptionCacheLoaded)
@@ -455,13 +476,33 @@ namespace Matriarch.Web.Components.Pages
 
             try
             {
+                // Trigger subscription service cache refresh which loads both subscriptions and MGs
+                await SubscriptionService.RefreshSubscriptionCacheAsync();
+                
+                // Get subscriptions from cache
                 var subscriptions = await SubscriptionService.GetAllSubscriptionsAsync();
                 subscriptionCache = subscriptions.ToDictionary(s => s.SubscriptionId, StringComparer.OrdinalIgnoreCase);
+                
+                // Populate management group cache by requesting all unique MG names from subscription hierarchies
+                var uniqueMgNames = subscriptions
+                    .SelectMany(s => s.ManagementGroupHierarchy)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                
+                foreach (var mgName in uniqueMgNames)
+                {
+                    var mg = await SubscriptionService.GetManagementGroupAsync(mgName);
+                    if (mg != null)
+                    {
+                        managementGroupCache[mgName] = mg;
+                    }
+                }
+                
                 subscriptionCacheLoaded = true;
             }
             catch (Exception ex)
             {
-                Logger.LogWarning(ex, "Error loading subscription cache");
+                Logger.LogWarning(ex, "Error loading subscription and management group cache");
             }
         }
     }

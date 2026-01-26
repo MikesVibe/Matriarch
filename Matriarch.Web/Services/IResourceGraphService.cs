@@ -35,6 +35,12 @@ public interface IResourceGraphService
     Task<List<SubscriptionDto>> FetchAllSubscriptionsAsync();
 
     /// <summary>
+    /// Fetches all management groups accessible to the current credentials from Azure Resource Graph.
+    /// </summary>
+    /// <returns>List of management groups with their display names</returns>
+    Task<List<ManagementGroupDto>> FetchAllManagementGroupsAsync();
+
+    /// <summary>
     /// Fetches the management group hierarchy for a specific subscription.
     /// </summary>
     /// <param name="subscriptionId">The subscription ID</param>

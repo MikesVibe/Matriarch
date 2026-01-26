@@ -804,6 +804,102 @@ public class AzureResourceGraphService : IResourceGraphService
         return subscriptions;
     }
 
+    public async Task<List<ManagementGroupDto>> FetchAllManagementGroupsAsync()
+    {
+        _logger.LogInformation("Fetching all management groups from Azure Resource Graph API...");
+
+        var managementGroups = new List<ManagementGroupDto>();
+        var (token, resourceGraphEndpoint) = await GetAuthorizationTokenAsync();
+
+        // Query to fetch all management groups
+        var query = @"
+            ResourceContainers
+            | where type =~ 'microsoft.management/managementgroups'
+            | project id = tostring(id),
+                      name = tostring(name),
+                      displayName = tostring(properties.displayName),
+                      tenantId = tostring(tenantId)";
+
+        string? skipToken = null;
+
+        do
+        {
+            var responseDocument = await FetchManagementGroupsPageAsync(token, resourceGraphEndpoint, query, skipToken);
+            var pageOfMgs = ParseManagementGroupsResponse(responseDocument);
+            managementGroups.AddRange(pageOfMgs);
+
+            skipToken = GetContinuationToken(responseDocument);
+        } while (!string.IsNullOrEmpty(skipToken));
+
+        _logger.LogInformation("Fetched {Count} management groups", managementGroups.Count);
+        return managementGroups;
+    }
+
+    private async Task<JsonDocument> FetchManagementGroupsPageAsync(AccessToken token, string resourceGraphEndpoint, string customQuery, string? skipToken)
+    {
+        var requestBody = new Dictionary<string, object>
+        {
+            ["query"] = customQuery,
+            ["options"] = new Dictionary<string, object>
+            {
+                ["resultFormat"] = "objectArray",
+                ["$top"] = 1000
+            }
+        };
+
+        if (!string.IsNullOrEmpty(skipToken))
+        {
+            ((Dictionary<string, object>)requestBody["options"])["$skipToken"] = skipToken;
+        }
+
+        var jsonContent = JsonSerializer.Serialize(requestBody);
+        var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+        var request = new HttpRequestMessage(HttpMethod.Post, resourceGraphEndpoint);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
+        request.Content = content;
+
+        var response = await SendRequestWithRetryAsync(request);
+        var responseContent = await response.Content.ReadAsStringAsync();
+        response.Dispose();
+        
+        return JsonDocument.Parse(responseContent);
+    }
+
+    private static List<ManagementGroupDto> ParseManagementGroupsResponse(JsonDocument responseDocument)
+    {
+        var managementGroups = new List<ManagementGroupDto>();
+
+        if (!responseDocument.RootElement.TryGetProperty("data", out var dataElement) ||
+            dataElement.ValueKind != JsonValueKind.Array)
+        {
+            return managementGroups;
+        }
+
+        foreach (var row in dataElement.EnumerateArray())
+        {
+            if (row.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            // Extract the management group name from the ID
+            // ID format: /providers/Microsoft.Management/managementGroups/{mgName}
+            var id = row.TryGetProperty("id", out var idProp) ? idProp.GetString() ?? string.Empty : string.Empty;
+            var name = row.TryGetProperty("name", out var nameProp) ? nameProp.GetString() ?? string.Empty : string.Empty;
+            var displayName = row.TryGetProperty("displayName", out var displayNameProp) ? displayNameProp.GetString() ?? string.Empty : string.Empty;
+
+            managementGroups.Add(new ManagementGroupDto
+            {
+                Id = id,
+                Name = name,
+                DisplayName = displayName
+            });
+        }
+
+        return managementGroups;
+    }
+
     public async Task<List<string>> FetchManagementGroupHierarchyAsync(string subscriptionId)
     {
         if (string.IsNullOrWhiteSpace(subscriptionId))

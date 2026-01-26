@@ -3,7 +3,7 @@ using Matriarch.Web.Models;
 namespace Matriarch.Web.Services;
 
 /// <summary>
-/// Service for managing subscription data and caching.
+/// Service for managing subscription and management group data and caching.
 /// </summary>
 public interface ISubscriptionService
 {
@@ -15,7 +15,14 @@ public interface ISubscriptionService
     Task<SubscriptionDto?> GetSubscriptionAsync(string subscriptionId);
 
     /// <summary>
-    /// Refreshes the subscription cache by fetching all subscriptions from Azure Resource Graph.
+    /// Gets management group information by management group name. Uses cache and auto-refreshes if not found.
+    /// </summary>
+    /// <param name="managementGroupName">The management group name</param>
+    /// <returns>Management group information or null if not found</returns>
+    Task<ManagementGroupDto?> GetManagementGroupAsync(string managementGroupName);
+
+    /// <summary>
+    /// Refreshes the subscription and management group cache by fetching all data from Azure Resource Graph.
     /// </summary>
     Task RefreshSubscriptionCacheAsync();
 
