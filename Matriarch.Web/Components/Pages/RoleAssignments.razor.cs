@@ -468,6 +468,7 @@ namespace Matriarch.Web.Components.Pages
             // Returns management group from the preloaded cache
             if (managementGroupCache.TryGetValue(managementGroupName, out var mg))
             {
+                Logger.LogDebug("Found MG {MgName} in cache: {DisplayName}", managementGroupName, mg.DisplayName);
                 return mg;
             }
             
@@ -476,15 +477,22 @@ namespace Matriarch.Web.Components.Pages
             // The service should have already loaded all MGs during cache initialization
             try
             {
-                // We'll use Task.Run to make this synchronous call
-                var mgTask = SubscriptionService.GetManagementGroupAsync(managementGroupName);
-                mgTask.Wait(); // This is safe because the service should already have the data cached
+                Logger.LogDebug("MG {MgName} not in local cache, fetching from service", managementGroupName);
                 
-                if (mgTask.Result != null)
+                // We'll use GetAwaiter().GetResult() to make this synchronous call
+                // This is safe because the service should already have the data cached
+                var mg2 = SubscriptionService.GetManagementGroupAsync(managementGroupName).GetAwaiter().GetResult();
+                
+                if (mg2 != null)
                 {
+                    Logger.LogDebug("Found MG {MgName} from service: {DisplayName}", managementGroupName, mg2.DisplayName);
                     // Cache it locally for future use
-                    managementGroupCache[managementGroupName] = mgTask.Result;
-                    return mgTask.Result;
+                    managementGroupCache[managementGroupName] = mg2;
+                    return mg2;
+                }
+                else
+                {
+                    Logger.LogWarning("MG {MgName} not found in service cache", managementGroupName);
                 }
             }
             catch (Exception ex)
