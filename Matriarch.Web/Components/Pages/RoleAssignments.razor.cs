@@ -352,11 +352,14 @@ namespace Matriarch.Web.Components.Pages
                     
                     if (subscription != null)
                     {
-                        var tooltipText = $"{subscription.Name}";
+                        // Build tooltip text with subscription name and MG hierarchy
+                        // HTML title attribute supports line breaks with actual newlines
+                        var tooltipParts = new List<string> { subscription.Name };
                         if (subscription.ManagementGroupHierarchy != null && subscription.ManagementGroupHierarchy.Any())
                         {
-                            tooltipText += $"\n{string.Join(" > ", subscription.ManagementGroupHierarchy)}";
+                            tooltipParts.Add(string.Join(" > ", subscription.ManagementGroupHierarchy));
                         }
+                        var tooltipText = string.Join("\n", tooltipParts);
 
                         builder.OpenElement(0, "code");
                         builder.AddAttribute(1, "class", "text-muted");
@@ -367,7 +370,7 @@ namespace Matriarch.Web.Components.Pages
                     }
                     else
                     {
-                        // No subscription info available
+                        // No subscription info available - still show scope but without tooltip
                         builder.OpenElement(0, "code");
                         builder.AddAttribute(1, "class", "text-muted");
                         builder.AddContent(2, scope);
@@ -452,8 +455,11 @@ namespace Matriarch.Web.Components.Pages
             // Returns subscription from the preloaded cache
             if (subscriptionCache.TryGetValue(subscriptionId, out var subscription))
             {
+                Logger.LogDebug("Found subscription {SubId} in cache: {SubName}", subscriptionId, subscription.Name);
                 return subscription;
             }
+            Logger.LogWarning("Subscription {SubId} not found in cache (cache has {Count} entries)", 
+                subscriptionId, subscriptionCache.Count);
             return null;
         }
 
