@@ -198,7 +198,21 @@
                         </dd>
 
                         <dt class="col-sm-3">Name:</dt>
-                        <dd class="col-sm-9">@result.Identity.Name</dd>
+                        <dd class="col-sm-9">
+                            @{
+                                var identityUrl = GetIdentityPortalUrl(result.Identity);
+                                if (!string.IsNullOrEmpty(identityUrl))
+                                {
+                                    <a href="@identityUrl" target="_blank" rel="noopener noreferrer">
+                                        @result.Identity.Name <i class="bi bi-box-arrow-up-right ms-1"></i>
+                                    </a>
+                                }
+                                else
+                                {
+                                    @result.Identity.Name
+                                }
+                            }
+                        </dd>
 
                         @if (result.Identity.Type == IdentityType.User)
                         {
@@ -233,8 +247,34 @@
                             {
                                 @if (!string.IsNullOrEmpty(result.Identity.SubscriptionId))
                                 {
-                                    <dt class="col-sm-3">Subscription ID:</dt>
-                                    <dd class="col-sm-9"><code>@result.Identity.SubscriptionId</code></dd>
+                                    <dt class="col-sm-3">Subscription:</dt>
+                                    <dd class="col-sm-9">
+                                        @{
+                                            var subscriptionUrl = GetSubscriptionPortalUrl(result.Identity.SubscriptionId);
+                                            if (!string.IsNullOrEmpty(result.Identity.SubscriptionName))
+                                            {
+                                                <a href="@subscriptionUrl" target="_blank" rel="noopener noreferrer">
+                                                    @result.Identity.SubscriptionName <i class="bi bi-box-arrow-up-right ms-1"></i>
+                                                </a>
+                                                <br />
+                                                <small class="text-muted"><code>@result.Identity.SubscriptionId</code></small>
+                                            }
+                                            else
+                                            {
+                                                <a href="@subscriptionUrl" target="_blank" rel="noopener noreferrer">
+                                                    <code>@result.Identity.SubscriptionId</code> <i class="bi bi-box-arrow-up-right ms-1"></i>
+                                                </a>
+                                            }
+                                        }
+                                    </dd>
+                                }
+
+                                @if (result.Identity.ManagementGroupHierarchy != null && result.Identity.ManagementGroupHierarchy.Any())
+                                {
+                                    <dt class="col-sm-3">Management Groups:</dt>
+                                    <dd class="col-sm-9">
+                                        @string.Join(" > ", result.Identity.ManagementGroupHierarchy)
+                                    </dd>
                                 }
 
                                 @if (!string.IsNullOrEmpty(result.Identity.ResourceGroup))
@@ -287,7 +327,7 @@
                                     {
                                         <tr>
                                             <td>@ra.RoleName</td>
-                                            <td><code>@ra.Scope</code></td>
+                                            <td>@RenderScopeWithTooltip(ra.Scope)</td>
                                             <td><span class="badge bg-primary">@ra.AssignedTo</span></td>
                                         </tr>
                                     }
@@ -447,7 +487,7 @@
                                         {
                                             <tr>
                                                 <td><strong>@ra.RoleName</strong></td>
-                                                <td><code class="text-muted">@ra.Scope</code></td>
+                                                <td>@RenderScopeWithTooltip(ra.Scope)</td>
                                                 <td><span class="badge bg-info">@ra.AssignedTo</span></td>
                                             </tr>
                                         }

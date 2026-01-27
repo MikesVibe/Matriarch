@@ -1,10 +1,18 @@
 ﻿using Matriarch.Web.Models;
 using Microsoft.JSInterop;
+using Microsoft.AspNetCore.Components;
+using Matriarch.Web.Services;
+using Matriarch.Shared.Services;
+using Microsoft.Extensions.Logging;
 
 namespace Matriarch.Web.Components.Pages
 {
     public partial class RoleAssignments
     {
+        [Inject] private ITenantContext TenantContext { get; set; } = default!;
+        [Inject] private ISubscriptionService SubscriptionService { get; set; } = default!;
+        [Inject] private ILogger<RoleAssignments> Logger { get; set; } = default!;
+
         private string identityInput = "";
         private bool isLoading = false;
         private bool useParallelProcessing = true;
@@ -13,6 +21,11 @@ namespace Matriarch.Web.Components.Pages
         private string? errorMessage;
         private IdentitySearchResult? searchResult;
         private Identity? selectedIdentity;
+
+        // Cache for subscription and management group lookups
+        private Dictionary<string, SubscriptionDto> subscriptionCache = new();
+        private Dictionary<string, ManagementGroupDto> managementGroupCache = new();
+        private bool subscriptionCacheLoaded = false;
 
         // Loading states for progressive loading
         private bool isLoadingDirectRoleAssignments = false;
@@ -29,6 +42,9 @@ namespace Matriarch.Web.Components.Pages
             {
                 return;
             }
+
+            // Trim whitespace from identity input
+            identityInput = identityInput.Trim();
 
             isLoading = true;
             errorMessage = null;
@@ -88,6 +104,9 @@ namespace Matriarch.Web.Components.Pages
 
             try
             {
+                // Preload subscription cache if not already loaded
+                await EnsureSubscriptionCacheLoadedAsync();
+
                 // Initialize result with identity
                 result = new IdentityRoleAssignmentResult
                 {
@@ -287,6 +306,233 @@ namespace Matriarch.Web.Components.Pages
             // Remove invalid characters from filename
             var invalidChars = Path.GetInvalidFileNameChars();
             return string.Join("_", fileName.Split(invalidChars, StringSplitOptions.RemoveEmptyEntries)).TrimEnd('.');
+        }
+
+        private string? GetIdentityPortalUrl(Identity identity)
+        {
+            var tenantSettings = TenantContext.GetCurrentTenantSettings();
+            var cloudEnvironment = GraphClientFactory.ParseCloudEnvironment(tenantSettings.CloudEnvironment);
+            var tenantId = tenantSettings.TenantId;
+
+            return identity.Type switch
+            {
+                IdentityType.User => AzurePortalUrlHelper.GetUserUrl(cloudEnvironment, identity.ObjectId),
+                IdentityType.Group => AzurePortalUrlHelper.GetGroupUrl(cloudEnvironment, identity.ObjectId),
+                IdentityType.ServicePrincipal => AzurePortalUrlHelper.GetServicePrincipalUrl(cloudEnvironment, identity.ObjectId, identity.ApplicationId),
+                IdentityType.UserAssignedManagedIdentity => AzurePortalUrlHelper.GetManagedIdentityUrl(
+                    cloudEnvironment,
+                    tenantId,
+                    identity.SubscriptionId, 
+                    identity.ResourceGroup, 
+                    identity.Name, 
+                    true),
+                IdentityType.SystemAssignedManagedIdentity => null, // System-assigned MIs don't have their own portal page
+                _ => null
+            };
+        }
+
+        private string GetSubscriptionPortalUrl(string subscriptionId)
+        {
+            var tenantSettings = TenantContext.GetCurrentTenantSettings();
+            var cloudEnvironment = GraphClientFactory.ParseCloudEnvironment(tenantSettings.CloudEnvironment);
+            var tenantId = tenantSettings.TenantId;
+            return AzurePortalUrlHelper.GetSubscriptionUrl(cloudEnvironment, tenantId, subscriptionId);
+        }
+
+        private RenderFragment RenderScopeWithTooltip(string scope)
+        {
+            return builder =>
+            {
+                var subscriptionId = ExtractSubscriptionIdFromScope(scope);
+                var managementGroupId = ExtractManagementGroupIdFromScope(scope);
+                
+                if (!string.IsNullOrEmpty(subscriptionId))
+                {
+                    var subscription = GetSubscriptionInfoCached(subscriptionId);
+                    
+                    if (subscription != null)
+                    {
+                        // Build tooltip text with subscription name and MG hierarchy
+                        // HTML title attribute supports line breaks with actual newlines
+                        var tooltipParts = new List<string> { subscription.Name };
+                        if (subscription.ManagementGroupHierarchy != null && subscription.ManagementGroupHierarchy.Any())
+                        {
+                            tooltipParts.Add(string.Join(" > ", subscription.ManagementGroupHierarchy));
+                        }
+                        var tooltipText = string.Join("\n", tooltipParts);
+
+                        builder.OpenElement(0, "code");
+                        builder.AddAttribute(1, "class", "text-muted");
+                        builder.AddAttribute(2, "title", tooltipText);
+                        builder.AddAttribute(3, "style", "cursor: help;");
+                        builder.AddContent(4, scope);
+                        builder.CloseElement();
+                    }
+                    else
+                    {
+                        // No subscription info available - still show scope but without tooltip
+                        builder.OpenElement(0, "code");
+                        builder.AddAttribute(1, "class", "text-muted");
+                        builder.AddContent(2, scope);
+                        builder.CloseElement();
+                    }
+                }
+                else if (!string.IsNullOrEmpty(managementGroupId))
+                {
+                    // Management Group scope - show tooltip with MG display name
+                    var mg = GetManagementGroupInfoCached(managementGroupId);
+                    string tooltipText;
+                    
+                    if (mg != null && !string.IsNullOrEmpty(mg.DisplayName))
+                    {
+                        tooltipText = $"Management Group: {mg.DisplayName}";
+                    }
+                    else
+                    {
+                        tooltipText = $"Management Group: {managementGroupId}";
+                    }
+
+                    builder.OpenElement(0, "code");
+                    builder.AddAttribute(1, "class", "text-muted");
+                    builder.AddAttribute(2, "title", tooltipText);
+                    builder.AddAttribute(3, "style", "cursor: help;");
+                    builder.AddContent(4, scope);
+                    builder.CloseElement();
+                }
+                else
+                {
+                    // Not a subscription or management group scope
+                    builder.OpenElement(0, "code");
+                    builder.AddAttribute(1, "class", "text-muted");
+                    builder.AddContent(2, scope);
+                    builder.CloseElement();
+                }
+            };
+        }
+
+        private string? ExtractSubscriptionIdFromScope(string scope)
+        {
+            // Scope format: /subscriptions/{subscriptionId}/...
+            if (string.IsNullOrEmpty(scope))
+            {
+                return null;
+            }
+
+            var parts = scope.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            for (int i = 0; i < parts.Length - 1; i++)
+            {
+                if (parts[i].Equals("subscriptions", StringComparison.OrdinalIgnoreCase))
+                {
+                    return parts[i + 1];
+                }
+            }
+
+            return null;
+        }
+
+        private string? ExtractManagementGroupIdFromScope(string scope)
+        {
+            // Scope format: /providers/Microsoft.Management/managementGroups/{managementGroupId}
+            if (string.IsNullOrEmpty(scope))
+            {
+                return null;
+            }
+
+            var parts = scope.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            for (int i = 0; i < parts.Length - 1; i++)
+            {
+                if (parts[i].Equals("managementGroups", StringComparison.OrdinalIgnoreCase))
+                {
+                    return parts[i + 1];
+                }
+            }
+
+            return null;
+        }
+
+        private SubscriptionDto? GetSubscriptionInfoCached(string subscriptionId)
+        {
+            // Returns subscription from the preloaded cache
+            if (subscriptionCache.TryGetValue(subscriptionId, out var subscription))
+            {
+                Logger.LogDebug("Found subscription {SubId} in cache: {SubName}", subscriptionId, subscription.Name);
+                return subscription;
+            }
+            Logger.LogWarning("Subscription {SubId} not found in cache (cache has {Count} entries)", 
+                subscriptionId, subscriptionCache.Count);
+            return null;
+        }
+
+        private ManagementGroupDto? GetManagementGroupInfoCached(string managementGroupName)
+        {
+            // Returns management group from the preloaded cache
+            if (managementGroupCache.TryGetValue(managementGroupName, out var mg))
+            {
+                Logger.LogDebug("Found MG {MgName} in cache: {DisplayName}", managementGroupName, mg.DisplayName);
+                return mg;
+            }
+            
+            // If not in cache, try to fetch synchronously from the SubscriptionService
+            // This is a workaround since we can't make async calls from RenderFragment
+            // The service should have already loaded all MGs during cache initialization
+            try
+            {
+                Logger.LogDebug("MG {MgName} not in local cache, fetching from service", managementGroupName);
+                
+                // We'll use GetAwaiter().GetResult() to make this synchronous call
+                // This is safe because the service should already have the data cached
+                var mg2 = SubscriptionService.GetManagementGroupAsync(managementGroupName).GetAwaiter().GetResult();
+                
+                if (mg2 != null)
+                {
+                    Logger.LogDebug("Found MG {MgName} from service: {DisplayName}", managementGroupName, mg2.DisplayName);
+                    // Cache it locally for future use
+                    managementGroupCache[managementGroupName] = mg2;
+                    return mg2;
+                }
+                else
+                {
+                    Logger.LogWarning("MG {MgName} not found in service cache", managementGroupName);
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Error fetching management group {MgName} synchronously", managementGroupName);
+            }
+            
+            return null;
+        }
+
+        private async Task EnsureSubscriptionCacheLoadedAsync()
+        {
+            if (subscriptionCacheLoaded)
+            {
+                return;
+            }
+
+            try
+            {
+                // Trigger subscription service cache refresh which loads both subscriptions and MGs
+                await SubscriptionService.RefreshSubscriptionCacheAsync();
+                
+                // Get subscriptions from cache
+                var subscriptions = await SubscriptionService.GetAllSubscriptionsAsync();
+                subscriptionCache = subscriptions.ToDictionary(s => s.SubscriptionId, StringComparer.OrdinalIgnoreCase);
+                
+                // Load all management groups into local cache
+                // We need to get all unique MG names that appear in scopes
+                // For now, we'll try to preload from the subscription hierarchies, but we need to get the actual MG objects
+                // The issue is that subscription hierarchies contain display names, not MG names
+                // So we need a different approach: load ALL management groups preemptively
+                
+                // Since we can't easily get all MG names from subscriptions, we'll populate on-demand
+                // But we'll trigger the service to load all MGs now
+                subscriptionCacheLoaded = true;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Error loading subscription and management group cache");
+            }
         }
     }
 }

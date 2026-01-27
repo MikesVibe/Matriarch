@@ -27,4 +27,23 @@ public interface IResourceGraphService
     /// <param name="tagValue">The tag value to search for (e.g., 'ptci-1567')</param>
     /// <returns>List of managed identity resources with the specified tag</returns>
     Task<List<ManagedIdentityResourceDto>> FetchManagedIdentitiesByTagAsync(string tagValue);
+
+    /// <summary>
+    /// Fetches all subscriptions accessible to the current credentials from Azure Resource Graph.
+    /// </summary>
+    /// <returns>List of subscriptions</returns>
+    Task<List<SubscriptionDto>> FetchAllSubscriptionsAsync();
+
+    /// <summary>
+    /// Fetches all management groups accessible to the current credentials from Azure Resource Graph.
+    /// </summary>
+    /// <returns>List of management groups with their display names</returns>
+    Task<List<ManagementGroupDto>> FetchAllManagementGroupsAsync();
+
+    /// <summary>
+    /// Fetches the management group hierarchy for a specific subscription.
+    /// </summary>
+    /// <param name="subscriptionId">The subscription ID</param>
+    /// <returns>List of management group names from root to child</returns>
+    Task<List<string>> FetchManagementGroupHierarchyAsync(string subscriptionId);
 }

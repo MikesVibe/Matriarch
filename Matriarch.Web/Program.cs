@@ -17,7 +17,7 @@ builder.Services.AddSingleton(appSettings);
 builder.Services.AddScoped<ITenantContext, TenantContext>();
 
 // Register HttpClient for services that need it
-builder.Services.AddHttpClient<IResourceGraphService, AzureResourceGraphService>();
+builder.Services.AddHttpClient<AzureResourceGraphService>();
 
 // Register custom services for role assignments
 builder.Services.AddScoped<IIdentityService, IdentityService>();
@@ -26,6 +26,7 @@ builder.Services.AddScoped<IApiPermissionsService, AzureApiPermissionsService>()
 builder.Services.AddScoped<IResourceGraphService, AzureResourceGraphService>();
 builder.Services.AddScoped<IRoleAssignmentService, AzureRoleAssignmentService>();
 builder.Services.AddScoped<IExcelExportService, ExcelExportService>();
+builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
 
 var app = builder.Build();
 

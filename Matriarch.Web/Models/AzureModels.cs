@@ -99,3 +99,19 @@ public class ManagedIdentityResourceDto
 // Both definitions are identical and refer to role assignment data from Azure Resource Graph
 public class AzureRoleAssignmentDto : RoleAssignmentDto { }
 
+public class SubscriptionDto
+{
+    public string SubscriptionId { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string TenantId { get; set; } = string.Empty;
+    public List<string> ManagementGroupHierarchy { get; set; } = new(); // Ordered from root to child
+}
+
+public class ManagementGroupDto
+{
+    public string Id { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string? ParentId { get; set; }
+}
+
