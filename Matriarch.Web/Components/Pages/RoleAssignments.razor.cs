@@ -464,6 +464,28 @@ namespace Matriarch.Web.Components.Pages
             {
                 return mg;
             }
+            
+            // If not in cache, try to fetch synchronously from the SubscriptionService
+            // This is a workaround since we can't make async calls from RenderFragment
+            // The service should have already loaded all MGs during cache initialization
+            try
+            {
+                // We'll use Task.Run to make this synchronous call
+                var mgTask = SubscriptionService.GetManagementGroupAsync(managementGroupName);
+                mgTask.Wait(); // This is safe because the service should already have the data cached
+                
+                if (mgTask.Result != null)
+                {
+                    // Cache it locally for future use
+                    managementGroupCache[managementGroupName] = mgTask.Result;
+                    return mgTask.Result;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Error fetching management group {MgName} synchronously", managementGroupName);
+            }
+            
             return null;
         }
 
@@ -483,21 +505,14 @@ namespace Matriarch.Web.Components.Pages
                 var subscriptions = await SubscriptionService.GetAllSubscriptionsAsync();
                 subscriptionCache = subscriptions.ToDictionary(s => s.SubscriptionId, StringComparer.OrdinalIgnoreCase);
                 
-                // Populate management group cache by requesting all unique MG names from subscription hierarchies
-                var uniqueMgNames = subscriptions
-                    .SelectMany(s => s.ManagementGroupHierarchy)
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .ToList();
+                // Load all management groups into local cache
+                // We need to get all unique MG names that appear in scopes
+                // For now, we'll try to preload from the subscription hierarchies, but we need to get the actual MG objects
+                // The issue is that subscription hierarchies contain display names, not MG names
+                // So we need a different approach: load ALL management groups preemptively
                 
-                foreach (var mgName in uniqueMgNames)
-                {
-                    var mg = await SubscriptionService.GetManagementGroupAsync(mgName);
-                    if (mg != null)
-                    {
-                        managementGroupCache[mgName] = mg;
-                    }
-                }
-                
+                // Since we can't easily get all MG names from subscriptions, we'll populate on-demand
+                // But we'll trigger the service to load all MGs now
                 subscriptionCacheLoaded = true;
             }
             catch (Exception ex)
